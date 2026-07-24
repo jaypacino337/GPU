@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CPU — the game</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖥️</text></svg>" />
+</head>
+<body>
+  <!-- Name gate shown on first visit -->
+  <div id="name-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2>CPU</h2>
+      <p>Pick a handle for the global leaderboard.</p>
+      <input id="name-input" maxlength="20" placeholder="e.g. ClockChampion" autocomplete="off" />
+      <button id="name-submit" class="btn primary">Boot up</button>
+      <p id="name-error" class="error hidden">Name must be 1–20 letters, numbers, spaces or -_.</p>
+    </div>
+  </div>
+
+  <header>
+    <h1>CPU<span class="blink">_</span></h1>
+    <p class="tagline">click the silicon. earn cycles. scale forever.</p>
+  </header>
+
+  <main>
+    <!-- Left column: the chip -->
+    <section class="panel clicker-panel">
+      <div class="counter">
+        <div id="cycles" class="cycles">0</div>
+        <div class="unit">cycles</div>
+        <div id="cps" class="cps">0 cycles/sec</div>
+      </div>
+
+      <button id="chip" class="chip" aria-label="Click the CPU">
+        <div class="chip-die">
+          <div class="chip-label">CPU</div>
+          <div id="chip-ghz" class="chip-ghz">1.0 GHz</div>
+        </div>
+      </button>
+
+      <div class="click-upgrade">
+        <button id="overclock-btn" class="btn upgrade">
+          <span class="up-name">Overclock <span id="oc-level"></span></span>
+          <span class="up-effect">click power ×2</span>
+          <span id="oc-cost" class="up-cost"></span>
+        </button>
+      </div>
+
+      <div class="prestige">
+        <button id="prestige-btn" class="btn prestige-btn" disabled>
+          New Architecture
+        </button>
+        <p id="prestige-info" class="prestige-info"></p>
+      </div>
+    </section>
+
+    <!-- Middle column: shop -->
+    <section class="panel shop-panel">
+      <h2>Hardware</h2>
+      <div id="shop"></div>
+    </section>
+
+    <!-- Right column: leaderboard + stats -->
+    <section class="panel side-panel">
+      <h2>Leaderboard</h2>
+      <ol id="leaderboard" class="leaderboard"><li class="dim">loading…</li></ol>
+
+      <h2>Stats</h2>
+      <ul class="stats">
+        <li>Lifetime cycles: <span id="stat-total">0</span></li>
+        <li>Cycles per click: <span id="stat-click">1</span></li>
+        <li>Architectures: <span id="stat-arch">0</span></li>
+        <li>Multiplier: <span id="stat-mult">×1</span></li>
+      </ul>
+      <p id="save-status" class="dim save-status"></p>
+    </section>
+  </main>
+
+  <div id="float-layer"></div>
+
+  <script src="game.js"></script>
+</body>
+</html>
