@@ -7,7 +7,7 @@
  * mint is unset, so an unset value has to be detectable rather than plausible.
  */
 
-import { UNSET } from "./index";
+import { UNSET } from "./unset";
 
 /** Per-ticker payout switch — the xStock itself, or its USDC equivalent. */
 export enum PayoutAsset {

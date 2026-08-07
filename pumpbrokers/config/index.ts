@@ -8,7 +8,9 @@
  * them rather than letting a zero or a default silently reach a transaction.
  */
 
-export const UNSET = "SET_ME" as const;
+import { UNSET } from "./unset";
+
+export { UNSET };
 
 export type Cluster = "devnet" | "mainnet-beta";
 
