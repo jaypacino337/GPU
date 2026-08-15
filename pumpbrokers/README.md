@@ -18,9 +18,9 @@ layout, the design decisions with reasoning, and the open questions.
 | 1. Plan | ✅ [PLAN.md](./PLAN.md) |
 | 2. Program + tests | ✅ written, ⚠️ **not deployed** — see *Toolchain* below |
 | 3. Assets → Arweave, Core collection | ⛔ blocked on token mint + decimals |
-| 4. Frontend core | ⛔ not started |
-| 5. Gallery + docs | ⛔ not started |
-| 6. Admin: fee collect + airdrop | ⛔ not started |
+| 4. Frontend core | ✅ builds and serves; needs real config to talk to chain |
+| 5. Gallery + docs | ✅ |
+| 6. Admin: fee collect + airdrop | 🟡 read/snapshot/CSV done; sends gated off |
 | 7. Hardening + security review | ⛔ not started |
 | 8. Mainnet checklist | ⛔ not started |
 
@@ -32,7 +32,10 @@ Being precise about this, because "tests pass" should mean something:
   tests, all passing** (`npm run test:unit`). They cover the 1,000-bit supply
   bitmap, index selection, the floor/reserve arithmetic, the mint→redeem cycle
   invariant, and a guard that `Config::LEN` matches the serialized layout.
-- ✅ **Executed** — `tsc --strict` on `config/` (clean).
+- ✅ **Executed** — `tsc --strict` on `config/` (clean), `tsc --noEmit` on the web
+  app (clean), `next build` (all 10 routes prerender), and a smoke test against
+  `next start`: pages render, and the RPC proxy correctly returns 405 on GET,
+  403 for a non-allowlisted method, and 503 when no upstream is configured.
 - ⚠️ **Written but not executed** — `tests/pumpbrokers.ts` (Anchor integration
   tests) and `scripts/devnet-e2e.ts`. This container's egress proxy blocks the
   Anza release host and the Anchor toolchain download, so `anchor build`,
@@ -51,6 +54,11 @@ programs/pumpbrokers/
                    set_paused, set_phase, withdraw_surplus
   src/state.rs     Config account, supply bitmap, floor math (+ unit tests)
   src/errors.rs    user-facing error messages
+web/               Next.js App Router frontend
+  app/             landing, mint, my-brokers, gallery, airdrop, admin, docs
+  app/api/rpc/     server-side RPC proxy — the Helius key lives here only
+  lib/             integer-only formatting, DAS reads, instruction builders,
+                   simulate-then-send, airdrop preflight gates
 tests/             Anchor integration tests
 scripts/           devnet lifecycle, upload estimation
 ```
@@ -58,6 +66,10 @@ scripts/           devnet lifecycle, upload estimation
 ## Running what exists
 
 ```bash
+# Frontend
+cd web && cp .env.example .env.local   # fill in the SET_ME values
+npm install && npm run dev
+
 # Unit tests — these work anywhere Rust does
 npm run test:unit          # cargo test -p pumpbrokers --lib
 

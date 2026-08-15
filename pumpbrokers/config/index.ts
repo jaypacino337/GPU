@@ -181,5 +181,13 @@ export function assertConfigReady(): void {
 }
 
 export { PUMPFUN } from "./pumpfun";
-export { TICKERS, PayoutAsset, airdropReadiness } from "./tickers";
+export {
+  TICKERS,
+  PayoutAsset,
+  airdropReadiness,
+  getTicker,
+  isTickerConfigured,
+  payoutMint,
+  USDC_MINT,
+} from "./tickers";
 export type { TickerConfig } from "./tickers";

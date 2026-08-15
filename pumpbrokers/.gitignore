@@ -6,3 +6,6 @@ node_modules/
 .anchor/
 test-ledger/
 dist/
+.env.local
+next-env.d.ts
+*.tsbuildinfo
