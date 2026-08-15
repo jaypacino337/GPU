@@ -57,11 +57,17 @@ export function rowsForTicker(
   return rows.sort((a, b) => b.count - a.count || a.owner.localeCompare(b.owner));
 }
 
+/**
+ * `funder` is the wallet whose token account actually pays out — the admin's
+ * own, since it is the admin that signs each transfer. It is NOT the
+ * $PUMPBROKER treasury token account: that account holds a different mint and
+ * its authority is a PDA that cannot sign an arbitrary SPL transfer.
+ */
 export async function preflight(
   connection: Connection,
   ticker: TickerConfig,
   holders: Map<string, BrokerAsset[]>,
-  treasuryOwner: PublicKey,
+  funder: PublicKey,
 ): Promise<Preflight> {
   const blockers: string[] = [];
   const warnings: string[] = [];
@@ -106,15 +112,15 @@ export async function preflight(
         );
       }
 
-      // Rule 2b — the treasury must hold enough to cover the whole distribution.
-      const ata = await getAssociatedTokenAddress(mintPk, treasuryOwner, true);
+      // Rule 2b — the funding wallet must hold enough to cover the whole run.
+      const ata = await getAssociatedTokenAddress(mintPk, funder, true);
       const account = await getAccount(connection, ata);
       treasuryBalance = account.amount;
 
       if (treasuryBalance < totalAmount) {
         blockers.push(
-          `Treasury holds ${treasuryBalance} base units of ${ticker.symbol} but the ` +
-            `distribution needs ${totalAmount}. Top it up before sending.`,
+          `Funding wallet holds ${treasuryBalance} base units of ${ticker.symbol} ` +
+            `but the distribution needs ${totalAmount}. Top it up before sending.`,
         );
       }
     } catch (e) {

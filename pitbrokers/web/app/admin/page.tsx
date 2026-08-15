@@ -9,7 +9,20 @@ import { buildSetPausedIx, buildSetPhaseIx } from "@/lib/instructions";
 import { simulateThenSend, TransactionFailure } from "@/lib/sendTransaction";
 import { snapshotHolders } from "@/lib/das";
 import { preflight, toCsv, type Preflight } from "@/lib/airdropPreflight";
-import { pumpAmmCreatorVaultAuthority, pumpBondingCreatorVault } from "@/lib/pdas";
+import {
+  pumpAmmCreatorVaultAuthority,
+  pumpBondingCreatorVault,
+  vaultPda,
+} from "@/lib/pdas";
+import { buildClaimToTreasuryIxs, claimableLamports } from "@/lib/pumpfunClaim";
+import {
+  executeAirdrop,
+  toLedger,
+  completedKeys,
+  summarise,
+  type TransferResult,
+  type AirdropLedger,
+} from "@/lib/airdropExecute";
 import { formatTokens, formatCompact, shortAddress, explorerUrl } from "@/lib/format";
 import { PHASE_LABEL } from "@/lib/configAccount";
 import { TICKERS, TOKEN, CLUSTER, PUMPFUN } from "@config";
@@ -55,11 +68,16 @@ export default function AdminPage() {
         publicKey={publicKey}
         signTransaction={signTransaction}
       />
-      <CreatorFeeSection connection={connection} publicKey={publicKey} />
+      <CreatorFeeSection
+        connection={connection}
+        publicKey={publicKey}
+        signTransaction={signTransaction}
+      />
       <AirdropSection
         connection={connection}
         collection={stats?.config.collection.toBase58()}
-        vault={stats?.config.treasury}
+        publicKey={publicKey}
+        signTransaction={signTransaction}
       />
     </div>
   );
@@ -235,14 +253,18 @@ function PauseSection({
 function CreatorFeeSection({
   connection,
   publicKey,
+  signTransaction,
 }: {
   connection: ReturnType<typeof useConnection>["connection"];
   publicKey: PublicKey | null;
+  signTransaction: ReturnType<typeof useWallet>["signTransaction"];
 }) {
   const [bonding, setBonding] = useState<bigint | null>(null);
   const [rentExempt, setRentExempt] = useState<bigint>(0n);
   const [ammVault, setAmmVault] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [claimSig, setClaimSig] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!publicKey) return;
@@ -265,7 +287,35 @@ function CreatorFeeSection({
     void load();
   }, [load]);
 
-  const claimable = bonding !== null && bonding > rentExempt ? bonding - rentExempt : 0n;
+  const claimable = claimableLamports(bonding ?? 0n, rentExempt);
+
+  async function claim() {
+    if (!publicKey || !signTransaction) return;
+    setBusy(true);
+    setError(null);
+    setClaimSig(null);
+    try {
+      // One transaction, two instructions: the permissionless claim to the
+      // admin's own wallet, then the forward to the vault. If the forward
+      // fails, the claim rolls back with it.
+      const signature = await simulateThenSend({
+        connection,
+        payer: publicKey,
+        instructions: buildClaimToTreasuryIxs({
+          creator: publicKey,
+          vault: vaultPda(),
+          lamports: claimable,
+        }),
+        signTransaction,
+      });
+      setClaimSig(signature);
+      await load();
+    } catch (e) {
+      setError(e instanceof TransactionFailure ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <Section title="Creator fees (pump.fun)">
@@ -318,17 +368,53 @@ function CreatorFeeSection({
           </p>
         </div>
 
-        <button type="button" className="btn-ghost" onClick={() => void load()}>
-          Refresh balances
-        </button>
+        <div className="border-2 border-edge p-3 text-xs text-muted">
+          <p className="font-display text-[10px] uppercase text-neon">
+            Where the SOL goes
+          </p>
+          <p className="mt-2">
+            Bonding-curve fees are paid in <strong>SOL</strong>, but the treasury
+            is a $PUMPBROKER token account, which cannot hold SOL. The claim
+            forwards lamports to the <strong>vault PDA</strong> — the same
+            program-owned authority that owns the treasury. Turning that SOL into
+            $PUMPBROKER, which is what would actually deepen redemption backing,
+            is a swap and is not done here.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap gap-3">
+          <button type="button" className="btn-ghost" onClick={() => void load()}>
+            Refresh balances
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={busy || claimable <= 0n || !publicKey || !signTransaction}
+            onClick={() => void claim()}
+          >
+            {busy
+              ? "Claiming…"
+              : claimable > 0n
+                ? `Claim ${formatTokens(claimable, 9, { maxFractionDigits: 4 })} SOL to vault`
+                : "Nothing to claim"}
+          </button>
+        </div>
+
+        {claimSig && (
+          <p className="border-2 border-neon p-3 text-xs text-bone">
+            Claimed.{" "}
+            <a
+              className="text-neon underline"
+              href={explorerUrl("tx", claimSig, CLUSTER)}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {shortAddress(claimSig, 6, 6)}
+            </a>
+          </p>
+        )}
 
         {error && <p className="border-2 border-down p-3 text-bone">{error}</p>}
-
-        <p className="text-xs text-muted">
-          Claim execution is wired to the verified IDL discriminators in{" "}
-          <code>config/pumpfun.ts</code>; it stays disabled until the flow has been
-          exercised on devnet against a real creator vault.
-        </p>
       </div>
     </Section>
   );
@@ -337,12 +423,17 @@ function CreatorFeeSection({
 function AirdropSection({
   connection,
   collection,
-  vault,
+  publicKey,
+  signTransaction,
 }: {
   connection: ReturnType<typeof useConnection>["connection"];
   collection: string | undefined;
-  vault: PublicKey | undefined;
+  publicKey: PublicKey | null;
+  signTransaction: ReturnType<typeof useWallet>["signTransaction"];
 }) {
+  const [results, setResults] = useState<TransferResult[]>([]);
+  const [sending, setSending] = useState(false);
+  const [ledger, setLedger] = useState<AirdropLedger | null>(null);
   const [selected, setSelected] = useState(TICKERS[0]!.symbol);
   const [result, setResult] = useState<Preflight | null>(null);
   const [running, setRunning] = useState(false);
@@ -350,7 +441,7 @@ function AirdropSection({
   const [snapshotAt, setSnapshotAt] = useState<string>("");
 
   async function runSnapshot() {
-    if (!collection || !vault) return;
+    if (!collection || !publicKey) return;
     setRunning(true);
     setError(null);
     setResult(null);
@@ -360,12 +451,76 @@ function AirdropSection({
       const holders = await snapshotHolders(collection);
       const taken = new Date().toISOString();
       setSnapshotAt(taken);
-      setResult(await preflight(connection, ticker, holders, vault));
+      // Gate against the wallet that will actually fund the transfers.
+      setResult(await preflight(connection, ticker, holders, publicKey));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setRunning(false);
     }
+  }
+
+  async function send(ready: Preflight) {
+    if (!publicKey || !signTransaction || !ready.payoutMintAddress) return;
+    const decimals =
+      typeof ready.ticker.decimals === "number" ? ready.ticker.decimals : 0;
+
+    setSending(true);
+    setError(null);
+    try {
+      const mint = new PublicKey(ready.payoutMintAddress);
+      // Source is the treasury's ATA for the payout mint, whose authority is the
+      // vault PDA — but the vault cannot sign an arbitrary SPL transfer, so the
+      // admin's own token account funds the distribution.
+      const source = await (
+        await import("@solana/spl-token")
+      ).getAssociatedTokenAddress(mint, publicKey);
+
+      const previous = ledger ? completedKeys(ledger) : undefined;
+
+      const outcome = await executeAirdrop({
+        connection,
+        payer: publicKey,
+        signTransaction,
+        mint,
+        decimals,
+        source,
+        sourceAuthority: publicKey,
+        rows: ready.rows,
+        ticker: ready.ticker.symbol,
+        snapshotAt,
+        completed: previous,
+        // Persist after every batch, so a crash loses at most one batch.
+        onProgress: (partial) => {
+          setResults(partial.slice());
+          setLedger(
+            toLedger(ready.ticker.symbol, snapshotAt, ready.payoutMintAddress!, partial),
+          );
+        },
+      });
+
+      setResults(outcome);
+      setLedger(
+        toLedger(ready.ticker.symbol, snapshotAt, ready.payoutMintAddress, outcome),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSending(false);
+    }
+  }
+
+  function downloadLedger() {
+    if (!ledger) return;
+    const blob = new Blob([JSON.stringify(ledger, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `airdrop-ledger-${ledger.ticker}-${ledger.snapshotAt}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   function downloadCsv() {
@@ -458,17 +613,96 @@ function AirdropSection({
               {result.totalRecipients} recipients · snapshot {snapshotAt}
             </p>
 
-            <button type="button" className="btn-primary" disabled={!result.ok}>
-              {result.ok ? "Send distribution" : "Send blocked"}
-            </button>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={!result.ok || sending || !publicKey || !signTransaction}
+                onClick={() => void send(result)}
+              >
+                {sending
+                  ? "Sending…"
+                  : result.ok
+                    ? `Send to ${result.totalRecipients} recipients`
+                    : "Send blocked"}
+              </button>
+              {ledger && (
+                <button type="button" className="btn-ghost" onClick={downloadLedger}>
+                  Export ledger JSON
+                </button>
+              )}
+            </div>
+
+            {results.length > 0 && <ProgressTable results={results} />}
+
             <p className="text-xs text-muted">
-              Execution runs batched transfers keyed by (ticker, snapshot, owner) so
-              a partial failure can be safely re-run without double-paying. It stays
-              disabled until a ticker passes every gate.
+              Transfers are batched and keyed by (ticker, snapshot, owner). The
+              ledger is updated after every batch, so a re-run skips anyone already
+              paid. Anything marked <span className="text-down">unknown</span> was
+              submitted but never confirmed —{" "}
+              <strong className="text-bone">
+                verify those signatures on chain before re-running
+              </strong>
+              , because a blind retry could pay twice.
             </p>
           </>
         )}
       </div>
     </Section>
+  );
+}
+
+/** Live per-recipient outcome while a distribution runs. */
+function ProgressTable({ results }: { results: TransferResult[] }) {
+  const counts = summarise(results);
+  const tone: Record<string, string> = {
+    sent: "text-neon",
+    skipped: "text-muted",
+    failed: "text-down",
+    unknown: "text-down",
+  };
+
+  return (
+    <div className="border-2 border-edge p-3">
+      <p className="font-display text-[10px] uppercase text-muted">
+        {counts.sent} sent · {counts.skipped} skipped · {counts.failed} failed ·{" "}
+        <span className={counts.unknown > 0 ? "text-down" : ""}>
+          {counts.unknown} unknown
+        </span>
+      </p>
+
+      {counts.unknown > 0 && (
+        <p className="mt-2 border-2 border-down bg-down/10 p-2 text-xs text-bone">
+          {counts.unknown} transfer{counts.unknown === 1 ? " was" : "s were"}{" "}
+          submitted but never confirmed. Check the signature{counts.unknown === 1 ? "" : "s"}{" "}
+          on chain before re-running — these are excluded from the skip list
+          precisely so they are not silently retried.
+        </p>
+      )}
+
+      <ul className="mt-3 max-h-64 space-y-1 overflow-y-auto text-xs">
+        {results.map((r) => (
+          <li key={r.key} className="flex justify-between gap-3">
+            <span className="text-muted">{shortAddress(r.owner, 4, 4)}</span>
+            <span className={tone[r.outcome] ?? ""}>
+              {r.outcome}
+              {r.signature && (
+                <>
+                  {" "}
+                  <a
+                    className="underline"
+                    href={explorerUrl("tx", r.signature, CLUSTER)}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {shortAddress(r.signature, 4, 4)}
+                  </a>
+                </>
+              )}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
