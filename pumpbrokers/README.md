@@ -8,8 +8,14 @@ mint and a program-enforced price floor.
 - The 5% spread stays in a program-owned treasury, so the system self-funds
 - Redeemed pieces return to the mintable pool; supply stays at 1,000
 
-Read **[PLAN.md](./PLAN.md)** first. It carries the cost table, the account
-layout, the design decisions with reasoning, and the open questions.
+Read **[PLAN.md](./PLAN.md)** first — cost table, account layout, design
+decisions with reasoning, open questions. Then **[SECURITY.md](./SECURITY.md)**
+for what could go wrong, and **[MAINNET_CHECKLIST.md](./MAINNET_CHECKLIST.md)**
+for the launch sequence with per-step SOL costs.
+
+> **Status in one line:** the code is written and compile-verified; **nothing has
+> been deployed or exercised on any chain**. See *What was actually executed*
+> below before trusting any of it.
 
 ## Current state
 
@@ -21,8 +27,8 @@ layout, the design decisions with reasoning, and the open questions.
 | 4. Frontend core | ✅ builds and serves; needs real config to talk to chain |
 | 5. Gallery + docs | ✅ |
 | 6. Admin: fee collect + airdrop | 🟡 read/snapshot/CSV done; sends gated off |
-| 7. Hardening + security review | ⛔ not started |
-| 8. Mainnet checklist | ⛔ not started |
+| 7. Hardening + security review | ✅ [SECURITY.md](./SECURITY.md) |
+| 8. Mainnet checklist | ✅ [MAINNET_CHECKLIST.md](./MAINNET_CHECKLIST.md) |
 
 ### What was actually executed vs only written
 
