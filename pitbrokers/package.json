@@ -9,10 +9,15 @@
     "lint": "prettier --check 'tests/**/*.ts' 'scripts/**/*.ts' 'config/**/*.ts'",
     "lint:fix": "prettier --write 'tests/**/*.ts' 'scripts/**/*.ts' 'config/**/*.ts'",
     "e2e:devnet": "ts-node scripts/devnet-e2e.ts",
-    "estimate:upload": "ts-node scripts/estimate-upload.ts"
+    "upload:quote": "ts-node scripts/upload-assets.ts",
+    "upload:confirm": "ts-node scripts/upload-assets.ts --confirm",
+    "collection:create": "ts-node scripts/create-collection.ts",
+    "rarity": "ts-node scripts/compute-rarity.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.1",
+    "@irys/upload": "^0.0.15",
+    "@irys/upload-solana": "^0.1.8",
     "@metaplex-foundation/mpl-core": "^1.4.0",
     "@metaplex-foundation/umi": "^1.0.0",
     "@metaplex-foundation/umi-bundle-defaults": "^1.0.0",

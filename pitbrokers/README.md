@@ -23,10 +23,10 @@ for the launch sequence with per-step SOL costs.
 |---|---|
 | 1. Plan | ✅ [PLAN.md](./PLAN.md) |
 | 2. Program + tests | ✅ written, ⚠️ **not deployed** — see *Toolchain* below |
-| 3. Assets → Arweave, Core collection | ⛔ blocked on token mint + decimals |
+| 3. Assets → Arweave, Core collection | ✅ scripts written + guards tested; needs real assets |
 | 4. Frontend core | ✅ builds and serves; needs real config to talk to chain |
 | 5. Gallery + docs | ✅ |
-| 6. Admin: fee collect + airdrop | 🟡 read/snapshot/CSV done; sends gated off |
+| 6. Admin: fee collect + airdrop | ✅ execution implemented; unexercised on chain |
 | 7. Hardening + security review | ✅ [SECURITY.md](./SECURITY.md) |
 | 8. Mainnet checklist | ✅ [MAINNET_CHECKLIST.md](./MAINNET_CHECKLIST.md) |
 
@@ -66,7 +66,11 @@ web/               Next.js App Router frontend
   lib/             integer-only formatting, DAS reads, instruction builders,
                    simulate-then-send, airdrop preflight gates
 tests/             Anchor integration tests
-scripts/           devnet lifecycle, upload estimation
+scripts/
+  upload-assets.ts     Irys quote; refuses to spend without --confirm
+  create-collection.ts Core collection, update authority = vault PDA (verified)
+  compute-rarity.ts    writes web/public/rarity.json
+  devnet-e2e.ts        full lifecycle, asserts the invariant at every step
 ```
 
 ## Running what exists

@@ -10,12 +10,14 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { buildRedeemIx } from "@/lib/instructions";
 import { simulateThenSend, TransactionFailure } from "@/lib/sendTransaction";
 import { formatTokens, explorerUrl, shortAddress } from "@/lib/format";
+import { useRarity } from "@/lib/rarity";
 import { CLUSTER, TOKEN } from "@config";
 
 export default function MyBrokersPage() {
   const { connection } = useConnection();
   const { publicKey, signTransaction, connected } = useWallet();
   const { stats, refresh } = useCollectionStats();
+  const rankOf = useRarity();
 
   const [assets, setAssets] = useState<BrokerAsset[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -160,7 +162,7 @@ export default function MyBrokersPage() {
           {assets.map((asset) => (
             <NftCard
               key={asset.address}
-              asset={asset}
+              asset={{ ...asset, rank: rankOf(asset.index) }}
               footer={
                 <button
                   type="button"

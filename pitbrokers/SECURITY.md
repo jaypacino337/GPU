@@ -173,27 +173,34 @@ builder calls, whether the vault PDA correctly signs as collection update
 authority, and whether `BaseAssetV1` deserialises as expected against a real Core
 account. These are the highest-risk unverified surface in the project.
 
-### 5.2 Confirmation timeout after signing
+### 5.2 Confirmation timeout after signing — **closed**
 
-If a wallet disconnects between signing and confirmation, the UI reports failure
-while the transaction may still land. A user could conclude a mint failed and
-mint twice. Should poll by signature on reconnect.
+`simulateThenSend` now checks `getSignatureStatuses` once before reporting
+failure, and throws a distinct `UnconfirmedTransaction` carrying the signature
+rather than a generic error. The message tells the user to check the explorer
+before retrying, precisely so nobody concludes a mint failed and mints twice.
 
-### 5.3 Airdrop execution is unwritten
+### 5.3 Airdrop execution — **written** (`lib/airdropExecute.ts`)
 
-Snapshot, preflight and CSV export are done. Batched transfer execution — with
-the idempotency key already defined in `airdropPreflight.ts` — is not. The send
-button is disabled rather than half-working.
+Batched transfers with three layers of idempotency, and an explicit `unknown`
+outcome for submitted-but-unconfirmed batches that is excluded from the skip
+list so it can never be silently retried. Unexercised against a real cluster.
 
-### 5.4 Creator-fee claim execution is unwritten
+### 5.4 Creator-fee claim — **written** (`lib/pumpfunClaim.ts`)
 
-PDAs and discriminators are pinned from the live IDLs and balances are read. The
-two-instruction claim transaction is not built.
+One transaction, two instructions. Note that the claim yields **SOL**, which the
+$PUMPBROKER treasury token account cannot hold, so it forwards to the vault PDA
+instead. Converting to $PUMPBROKER is a swap and is not done. Unexercised.
 
-### 5.5 No rarity ranks
+### 5.5 Rarity ranks — **closed**
 
-`NftCard` and the gallery accept a `rank`, but nothing computes it. Needs a
-script over the 1,000 metadata files.
+`scripts/compute-rarity.ts` writes `web/public/rarity.json`; the gallery and My
+Brokers read it. Verified against a synthetic 1,000-piece collection: ranks come
+out as exactly 1..1000 with no gaps or duplicates.
+
+**A finding from running it:** all 100 airdrop pieces rank as the 100 rarest,
+because a ticker value appears on only 10 of 1,000 pieces. That makes the grind
+target in §3 trivially identifiable and sharpens the argument for commit-reveal.
 
 ---
 

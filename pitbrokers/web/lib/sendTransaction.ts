@@ -33,6 +33,50 @@ const PROGRAM_ERRORS: Record<string, string> = {
   PoolExhausted: "No unminted PitBrokers remain.",
 };
 
+/**
+ * Submitted, but we never learned the outcome.
+ *
+ * Deliberately a distinct type from TransactionFailure: the UI must NOT invite
+ * a retry here, because the transaction may already have succeeded. The message
+ * carries the signature so the user can check for themselves.
+ */
+export class UnconfirmedTransaction extends Error {
+  constructor(
+    readonly signature: string,
+    /** True when a follow-up check found no trace of it on chain. */
+    readonly likelyDropped: boolean,
+  ) {
+    super(
+      likelyDropped
+        ? `The network did not confirm your transaction in time and it does not appear ` +
+          `on chain, so it most likely never landed. Check ${signature} before retrying.`
+        : `Your transaction was submitted but not confirmed in time. It may still ` +
+          `land — check ${signature} on the explorer before trying again, so you ` +
+          `do not do it twice.`,
+    );
+    this.name = "UnconfirmedTransaction";
+  }
+}
+
+/** One follow-up check: true = landed ok, false = definitely not there, null = unclear. */
+async function didLand(
+  connection: Connection,
+  signature: string,
+): Promise<boolean | null> {
+  try {
+    const status = await connection.getSignatureStatuses([signature], {
+      searchTransactionHistory: true,
+    });
+    const value = status.value[0];
+    if (!value) return false;
+    if (value.err) return false;
+    return value.confirmationStatus === "confirmed" ||
+      value.confirmationStatus === "finalized";
+  } catch {
+    return null;
+  }
+}
+
 export class TransactionFailure extends Error {
   constructor(
     message: string,
@@ -140,17 +184,29 @@ export async function simulateThenSend({
     );
   }
 
-  const confirmation = await connection.confirmTransaction(
-    { signature, blockhash, lastValidBlockHeight },
-    "confirmed",
-  );
-
-  if (confirmation.value.err) {
-    throw new TransactionFailure(
-      `Transaction landed but failed: ${JSON.stringify(confirmation.value.err)}`,
-      [],
-      "confirm",
+  try {
+    const confirmation = await connection.confirmTransaction(
+      { signature, blockhash, lastValidBlockHeight },
+      "confirmed",
     );
+
+    if (confirmation.value.err) {
+      throw new TransactionFailure(
+        `Transaction landed but failed: ${JSON.stringify(confirmation.value.err)}`,
+        [],
+        "confirm",
+      );
+    }
+  } catch (e) {
+    if (e instanceof TransactionFailure) throw e;
+
+    // Timed out or the connection dropped while waiting. The transaction may
+    // still land — reporting a flat failure here is how someone concludes their
+    // mint failed and mints a second time. Check the chain once before deciding.
+    const landed = await didLand(connection, signature);
+    if (landed === true) return signature;
+
+    throw new UnconfirmedTransaction(signature, landed === false);
   }
 
   return signature;

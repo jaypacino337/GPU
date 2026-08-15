@@ -35,7 +35,7 @@ import {
   mplCore,
 } from "@metaplex-foundation/mpl-core";
 import { assert } from "chai";
-import type { Pumpbrokers } from "../target/types/pitbrokers";
+import type { Pitbrokers } from "../target/types/pitbrokers";
 
 const MPL_CORE_PROGRAM_ID = new PublicKey(
   "CoREENxT6tW1HoK8ypY1SxRMZTcVPm7R94rH4PZNhX7d",
@@ -53,7 +53,7 @@ describe("pitbrokers", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
-  const program = anchor.workspace.Pumpbrokers as Program<Pumpbrokers>;
+  const program = anchor.workspace.Pitbrokers as Program<Pitbrokers>;
   const authority = (provider.wallet as anchor.Wallet).payer;
 
   let tokenMint: PublicKey;

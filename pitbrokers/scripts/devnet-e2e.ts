@@ -37,6 +37,14 @@ const MINT_PRICE = 1_000_000n * ONE;
 const REDEEM_PRICE = 950_000n * ONE;
 const SUPPLY_CAP = 1000;
 
+/** The fields this script reads back from the Config account. */
+interface ConfigAccountView {
+  circulating: number;
+  mintedCount: number;
+  supplyCap: number;
+  phase: number;
+}
+
 function step(n: number, label: string) {
   console.log(`\n\x1b[1;32m[${n}]\x1b[0m ${label}`);
 }
@@ -49,7 +57,19 @@ function fmt(base: bigint): string {
 async function main() {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
-  const program = anchor.workspace.Pumpbrokers as anchor.Program;
+  const program = anchor.workspace.Pitbrokers as anchor.Program;
+
+  /**
+   * The generated IDL types only exist after `anchor build`, so this script is
+   * written against the untyped Program. Narrowing the one account we read here
+   * avoids sprinkling casts through the flow below.
+   */
+  const fetchConfig = (pda: PublicKey): Promise<ConfigAccountView> =>
+    (
+      program.account as unknown as {
+        config: { fetch(address: PublicKey): Promise<ConfigAccountView> };
+      }
+    ).config.fetch(pda);
   const authority = (provider.wallet as anchor.Wallet).payer;
 
   const cluster = provider.connection.rpcEndpoint;
@@ -107,7 +127,7 @@ async function main() {
   const available = async () => Number((await balance()) / REDEEM_PRICE);
 
   const report = async (label: string) => {
-    const cfg = await program.account.config.fetch(configPda);
+    const cfg = await fetchConfig(configPda);
     const bal = await balance();
     const reserved = BigInt(cfg.circulating) * REDEEM_PRICE;
     console.log(
@@ -263,7 +283,7 @@ async function main() {
     .signers([second])
     .rpc();
   console.log(`  sig: ${recycleSig}`);
-  const cfgAfter = await program.account.config.fetch(configPda);
+  const cfgAfter = await fetchConfig(configPda);
   console.log(
     `  minted_count still ${cfgAfter.mintedCount} — recycling does not inflate supply`,
   );
@@ -333,7 +353,7 @@ async function main() {
     .accounts({ authority: authority.publicKey, config: configPda })
     .rpc();
 
-  const cfg = await program.account.config.fetch(configPda);
+  const cfg = await fetchConfig(configPda);
   const bal = await balance();
   const reserved = BigInt(cfg.circulating) * REDEEM_PRICE;
   const surplus = bal > reserved ? bal - reserved : 0n;

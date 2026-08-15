@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useCollectionStats } from "@/lib/useCollectionStats";
 import { fetchCollectionPage } from "@/lib/das";
 import { NftCard, NftCardSkeleton, type BrokerAsset } from "@/components/NftCard";
+import { useRarity } from "@/lib/rarity";
 import { SUPPLY_CAP } from "@config";
 
 const PAGE_SIZE = 24;
@@ -12,6 +13,7 @@ type SortMode = "index" | "rarity";
 
 export default function GalleryPage() {
   const { stats } = useCollectionStats();
+  const rankOf = useRarity();
   const collection = stats?.config.collection.toBase58();
 
   const [page, setPage] = useState(1);
@@ -52,7 +54,10 @@ export default function GalleryPage() {
   }, [items]);
 
   const visible = useMemo(() => {
-    let list = [...(items ?? [])];
+    let list = (items ?? []).map((item) => ({
+      ...item,
+      rank: rankOf(item.index),
+    }));
     if (traitFilter) {
       list = list.filter((item) =>
         (item.attributes ?? []).some(
@@ -66,7 +71,7 @@ export default function GalleryPage() {
         : (a.index ?? 0) - (b.index ?? 0),
     );
     return list;
-  }, [items, traitFilter, sort]);
+  }, [items, traitFilter, sort, rankOf]);
 
   const totalPages = Math.max(1, Math.ceil((total || SUPPLY_CAP) / PAGE_SIZE));
 
