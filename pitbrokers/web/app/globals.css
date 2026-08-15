@@ -1,0 +1,126 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Flat pixel-art aesthetic: hard edges, no gradients, no blur.
+ * Dark only — the art is drawn against near-black.
+ */
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html {
+    background-color: #0a0d10;
+  }
+
+  body {
+    @apply bg-ink text-bone font-body antialiased;
+    /* Faint scanline grid. Uses hard-stop gradients so it stays crisp. */
+    background-image:
+      repeating-linear-gradient(
+        0deg,
+        rgba(34, 255, 106, 0.02) 0px,
+        rgba(34, 255, 106, 0.02) 1px,
+        transparent 1px,
+        transparent 4px
+      );
+  }
+
+  h1, h2, h3, h4 {
+    @apply font-display uppercase tracking-tight;
+  }
+
+  /* Visible focus everywhere — the neon palette makes it easy to lose. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-neon ring-offset-2 ring-offset-ink;
+  }
+}
+
+@layer components {
+  /*
+   * NON-NEGOTIABLE: every NFT image renders nearest-neighbour. A 1024px pixel
+   * PNG scaled with smoothing turns to mush and misrepresents the art.
+   */
+  .pixelated {
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+  }
+
+  .panel {
+    @apply border-2 border-edge bg-panel;
+  }
+
+  .panel-neon {
+    @apply border-2 border-neon bg-panel;
+  }
+
+  /* Hard offset shadow, no blur, snapping on press. */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 border-2 px-4 py-3
+           font-display text-sm uppercase tracking-wide transition-none
+           disabled:cursor-not-allowed disabled:opacity-40;
+    min-height: 44px; /* touch target — most traffic is phones */
+  }
+
+  .btn-primary {
+    @apply btn border-neon bg-neon text-ink shadow-pixel;
+  }
+  .btn-primary:not(:disabled):hover {
+    @apply bg-pump;
+  }
+  .btn-primary:not(:disabled):active {
+    @apply translate-x-[4px] translate-y-[4px] shadow-none;
+  }
+
+  .btn-ghost {
+    @apply btn border-edge bg-transparent text-bone;
+  }
+  .btn-ghost:not(:disabled):hover {
+    @apply border-neon text-neon;
+  }
+
+  .btn-danger {
+    @apply btn border-down bg-transparent text-down;
+  }
+  .btn-danger:not(:disabled):hover {
+    @apply bg-down text-bone;
+  }
+
+  .tag {
+    @apply inline-block border px-2 py-1 font-display text-[10px] uppercase tracking-wider;
+  }
+}
+
+/* Wallet adapter's default styling is round and soft — square it off. */
+.wallet-adapter-button {
+  border-radius: 0 !important;
+  font-family: var(--font-display), monospace !important;
+  text-transform: uppercase !important;
+  background-color: #22ff6a !important;
+  color: #0a0d10 !important;
+  height: 44px !important;
+  font-size: 13px !important;
+}
+.wallet-adapter-button:not([disabled]):hover {
+  background-color: #1fcb4f !important;
+}
+.wallet-adapter-modal-wrapper {
+  border-radius: 0 !important;
+  background-color: #111619 !important;
+  border: 2px solid #1e262b !important;
+}
+.wallet-adapter-modal-button-close {
+  border-radius: 0 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
