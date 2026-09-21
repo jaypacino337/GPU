@@ -1,10 +1,11 @@
 {
-  "name": "cpu-the-game",
+  "name": "cstr-chip-strategy",
   "version": "1.0.0",
-  "description": "CPU — an incremental idle game. Click the chip, earn cycles, build a compute empire.",
+  "description": "CSTR — chip strategy. Microchips are the new gold: mine chips, build your rig empire, climb the leaderboard.",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "admin": "node scripts/admin.js"
   },
   "engines": {
     "node": ">=18"

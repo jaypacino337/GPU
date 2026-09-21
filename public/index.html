@@ -3,25 +3,26 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CPU — the game</title>
+  <title>CSTR — chip strategy</title>
+  <meta name="description" content="CSTR: microchips are the new gold. Mine chips, build your rig empire, climb the leaderboard." />
   <link rel="stylesheet" href="style.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖥️</text></svg>" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔲</text></svg>" />
 </head>
 <body>
   <!-- Name gate shown on first visit -->
   <div id="name-modal" class="modal hidden">
     <div class="modal-card">
-      <h2>CPU</h2>
+      <h2>CSTR</h2>
       <p>Pick a handle for the global leaderboard.</p>
-      <input id="name-input" maxlength="20" placeholder="e.g. ClockChampion" autocomplete="off" />
-      <button id="name-submit" class="btn primary">Boot up</button>
+      <input id="name-input" maxlength="20" placeholder="e.g. ChipBaron" autocomplete="off" />
+      <button id="name-submit" class="btn primary">Power on</button>
       <p id="name-error" class="error hidden">Name must be 1–20 letters, numbers, spaces or -_.</p>
     </div>
   </div>
 
   <header>
-    <h1>CPU<span class="blink">_</span></h1>
-    <p class="tagline">click the silicon. earn cycles. scale forever.</p>
+    <h1>CSTR<span class="blink">_</span></h1>
+    <p class="tagline">chip strategy — microchips are the new gold. mine them, stack them, scale forever.</p>
   </header>
 
   <main>
@@ -29,13 +30,13 @@
     <section class="panel clicker-panel">
       <div class="counter">
         <div id="cycles" class="cycles">0</div>
-        <div class="unit">cycles</div>
-        <div id="cps" class="cps">0 cycles/sec</div>
+        <div class="unit">chips</div>
+        <div id="cps" class="cps">0 chips/sec</div>
       </div>
 
-      <button id="chip" class="chip" aria-label="Click the CPU">
+      <button id="chip" class="chip" aria-label="Mine a chip">
         <div class="chip-die">
-          <div class="chip-label">CPU</div>
+          <div class="chip-label">CSTR</div>
           <div id="chip-ghz" class="chip-ghz">1.0 GHz</div>
         </div>
       </button>
@@ -43,14 +44,14 @@
       <div class="click-upgrade">
         <button id="overclock-btn" class="btn upgrade">
           <span class="up-name">Overclock <span id="oc-level"></span></span>
-          <span class="up-effect">click power ×2</span>
+          <span class="up-effect">chips per click ×2</span>
           <span id="oc-cost" class="up-cost"></span>
         </button>
       </div>
 
       <div class="prestige">
         <button id="prestige-btn" class="btn prestige-btn" disabled>
-          New Architecture
+          Next-Gen Chip
         </button>
         <p id="prestige-info" class="prestige-info"></p>
       </div>
@@ -58,7 +59,7 @@
 
     <!-- Middle column: shop -->
     <section class="panel shop-panel">
-      <h2>Hardware</h2>
+      <h2>Mining Hardware</h2>
       <div id="shop"></div>
     </section>
 
@@ -69,9 +70,9 @@
 
       <h2>Stats</h2>
       <ul class="stats">
-        <li>Lifetime cycles: <span id="stat-total">0</span></li>
-        <li>Cycles per click: <span id="stat-click">1</span></li>
-        <li>Architectures: <span id="stat-arch">0</span></li>
+        <li>Lifetime chips: <span id="stat-total">0</span></li>
+        <li>Chips per click: <span id="stat-click">1</span></li>
+        <li>Chip generation: <span id="stat-arch">0</span></li>
         <li>Multiplier: <span id="stat-mult">×1</span></li>
       </ul>
       <p id="save-status" class="dim save-status"></p>

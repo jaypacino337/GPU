@@ -1,4 +1,4 @@
-/* CPU — the game. Vanilla JS incremental clicker. */
+/* CSTR — chip strategy. Vanilla JS incremental clicker. */
 (() => {
   'use strict';
 
@@ -6,14 +6,14 @@
   // Config
   // ------------------------------------------------------------------
   const BUILDINGS = [
-    { id: 'core',    name: 'Extra Core',           cps: 1,      baseCost: 15 },
-    { id: 'cache',   name: 'L1 Cache',             cps: 5,      baseCost: 100 },
-    { id: 'threads', name: 'Hyperthreading',       cps: 25,     baseCost: 750 },
-    { id: 'cooling', name: 'Liquid Cooling',       cps: 100,    baseCost: 5000 },
-    { id: 'vrm',     name: 'Overclock Module',     cps: 500,    baseCost: 30000 },
-    { id: 'rack',    name: 'Server Rack',          cps: 2500,   baseCost: 200000 },
-    { id: 'quantum', name: 'Quantum Co-Processor', cps: 12000,  baseCost: 1500000 },
-    { id: 'dc',      name: 'Datacenter',           cps: 60000,  baseCost: 10000000 },
+    { id: 'core',    name: 'USB Miner',       cps: 1,      baseCost: 15 },
+    { id: 'cache',   name: 'Mining Rig',      cps: 5,      baseCost: 100 },
+    { id: 'threads', name: 'GPU Cluster',     cps: 25,     baseCost: 750 },
+    { id: 'cooling', name: 'ASIC Miner',      cps: 100,    baseCost: 5000 },
+    { id: 'vrm',     name: 'Server Rack',     cps: 500,    baseCost: 30000 },
+    { id: 'rack',    name: 'Chip Fab',        cps: 2500,   baseCost: 200000 },
+    { id: 'quantum', name: 'Quantum Miner',   cps: 12000,  baseCost: 1500000 },
+    { id: 'dc',      name: 'Mega Datacenter', cps: 60000,  baseCost: 10000000 },
   ];
   const COST_GROWTH = 1.15;          // shop item cost multiplier per purchase
   const OC_BASE_COST = 50;           // overclock (click power) base cost
@@ -32,8 +32,8 @@
     architectures: 0,
     buildings: Object.fromEntries(BUILDINGS.map((b) => [b.id, 0])),
   };
-  let playerId = localStorage.getItem('cpu.playerId');
-  let playerName = localStorage.getItem('cpu.playerName');
+  let playerId = localStorage.getItem('cstr.playerId');
+  let playerName = localStorage.getItem('cstr.playerName');
 
   // ------------------------------------------------------------------
   // Derived values
@@ -82,7 +82,7 @@
       `<span class="item-name">${b.name}</span>` +
       `<span class="item-cost"></span>` +
       `<span class="item-count"></span>` +
-      `<span class="item-effect">+${fmt(b.cps)} cycles/sec</span>`;
+      `<span class="item-effect">+${fmt(b.cps)} chips/sec</span>`;
     btn.addEventListener('click', () => {
       const cost = buildingCost(b);
       if (state.cycles < cost) return;
@@ -124,7 +124,7 @@
   el.prestigeBtn.addEventListener('click', () => {
     const gain = pendingArchPoints();
     if (gain <= 0) return;
-    if (!confirm(`Retire this chip and design a new architecture?\n\nYou gain +${gain} architecture point(s) (+${gain * 10}% permanent boost) but lose all cycles and hardware.`)) {
+    if (!confirm(`Retire this chip and tape out the next generation?\n\nYou gain +${gain} generation point(s) (+${gain * 10}% permanent boost) but lose all chips and hardware.`)) {
       return;
     }
     state.architectures += gain;
@@ -150,7 +150,7 @@
   // ------------------------------------------------------------------
   function render() {
     el.cycles.textContent = fmt(state.cycles);
-    el.cps.textContent = fmt(cps()) + ' cycles/sec';
+    el.cps.textContent = fmt(cps()) + ' chips/sec';
     el.chipGhz.textContent = (1 + state.clickLevel * 0.5).toFixed(1) + ' GHz';
 
     el.ocLevel.textContent = 'Lv.' + (state.clickLevel + 1);
@@ -166,11 +166,11 @@
 
     const pending = pendingArchPoints();
     el.prestigeBtn.disabled = pending <= 0;
-    el.prestigeBtn.textContent = pending > 0 ? `New Architecture (+${pending})` : 'New Architecture';
+    el.prestigeBtn.textContent = pending > 0 ? `Next-Gen Chip (+${pending})` : 'Next-Gen Chip';
     el.prestigeInfo.textContent =
       pending > 0
         ? `Reset now for +${pending * 10}% permanent output.`
-        : `Reach ${fmt((state.architectures + 1) * PRESTIGE_REQ)} lifetime cycles to unlock.`;
+        : `Reach ${fmt((state.architectures + 1) * PRESTIGE_REQ)} lifetime chips to unlock.`;
 
     el.statTotal.textContent = fmt(state.totalCycles);
     el.statClick.textContent = fmt(clickPower());
@@ -216,7 +216,7 @@
     } catch {
       el.saveStatus.textContent = 'save failed — retrying later';
     }
-    localStorage.setItem('cpu.save', JSON.stringify(state));
+    localStorage.setItem('cstr.save', JSON.stringify(state));
   }
 
   async function load() {
@@ -230,7 +230,7 @@
       } catch { /* fall through */ }
     }
     try {
-      const local = JSON.parse(localStorage.getItem('cpu.save'));
+      const local = JSON.parse(localStorage.getItem('cstr.save'));
       if (local) Object.assign(state, local);
     } catch { /* fresh start */ }
   }
@@ -272,8 +272,8 @@
       });
       playerId = data.id;
       playerName = data.name;
-      localStorage.setItem('cpu.playerId', playerId);
-      localStorage.setItem('cpu.playerName', playerName);
+      localStorage.setItem('cstr.playerId', playerId);
+      localStorage.setItem('cstr.playerName', playerName);
       el.modal.classList.add('hidden');
       save();
     } catch {
@@ -296,7 +296,7 @@
     setInterval(save, SAVE_INTERVAL);
     setInterval(refreshLeaderboard, LB_INTERVAL);
     window.addEventListener('beforeunload', () => {
-      localStorage.setItem('cpu.save', JSON.stringify(state));
+      localStorage.setItem('cstr.save', JSON.stringify(state));
     });
   })();
 })();
