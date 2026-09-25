@@ -9,6 +9,7 @@
  */
 
 import { decodeApproval } from "./decode";
+import { formatEth, formatGwei } from "./format";
 import { computeAssetDeltas, gasCost, totalSent } from "./diff";
 import {
   sameAddress,
@@ -175,7 +176,9 @@ export function decideGate(input: RiskInput): GateDecision {
       code: "gas",
       severity: "info",
       title: "Network fee",
-      detail: `${gas} wei at ${outcome.gasPrice} wei per gas.`,
+      // Native decimals are always 18, so this one finding can be formatted
+      // here. Token amounts stay in base units until a metadata source exists.
+      detail: `${formatEth(gas)} at ${formatGwei(outcome.gasPrice)}.`,
     });
   }
 

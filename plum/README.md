@@ -25,7 +25,9 @@ src/engine/    no network, no framework
   diff.ts      simulation outcome -> signed balance deltas
   risk.ts      deltas + approvals -> gate decision
   run.ts       skills, and the run state machine
+  format.ts    bigint -> human, at the edge only
 src/chain/
+src/demo/      the product loop, runnable against a dev chain
   simulator.ts Simulator port + three implementations
 contracts/     a minimal ERC-20, used only by the end-to-end test
 test/
@@ -101,7 +103,7 @@ named after exactly that.
 
 ```bash
 npm install
-npm test          # 83 tests
+npm test          # 98 tests
 
 # The end-to-end tests need a dev chain. Without one they skip, loudly.
 npx hardhat node  # in another terminal
@@ -111,6 +113,19 @@ npm test
 The end-to-end suite refuses to run against anything but chain 31337, and skips
 with the reason printed rather than failing, since a missing dev node is an
 environment gap and not a regression.
+
+### See the loop
+
+With a dev node running, this deploys a token, works through a skill's read
+steps, composes an approval, simulates it and stops at the gate:
+
+```bash
+npm run demo                          # capped approval, then approve
+npm run demo -- --unlimited --reject  # unlimited approval, then reject
+```
+
+The second one is the interesting one: the gate turns red, names what the
+spender would be able to do, and the rejection leaves the chain untouched.
 
 To regenerate the test token after editing `contracts/TestToken.sol`:
 
@@ -125,6 +140,7 @@ cd contracts && node ../node_modules/.bin/solcjs --bin --abi --optimize TestToke
 - **Wallet connection.** The engine produces a gate decision; handing the
   approved transaction to a wallet for signature is not wired up.
 - **Routines.** Scheduling exists on the landing page, not in code.
-- **Token metadata.** Findings quote base units. Decimals and symbols need a
-  metadata source before the gate reads the way the mockup does.
+- **Token metadata.** Token amounts in findings are still base units — `src/engine/format.ts`
+  can render them, but nothing yet knows a given token's decimals or symbol. The
+  gas finding is formatted because native decimals are always 18.
 - **`eth_simulateV1` verification**, as above.
