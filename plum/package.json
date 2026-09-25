@@ -1,0 +1,21 @@
+{
+  "name": "plum",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "node:dev": "hardhat node"
+  },
+  "dependencies": {
+    "viem": "^2.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "hardhat": "^2.22.17",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
