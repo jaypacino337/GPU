@@ -13,8 +13,10 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+html { -webkit-text-size-adjust: 100%; }
 body {
-  background: radial-gradient(1200px 600px at 50% -100px, #12203a 0%, var(--bg) 60%);
+  overflow-x: hidden;
+  background: radial-gradient(1200px 600px at 50% -100px, #12203a 0%, var(--bg) 60%) no-repeat var(--bg);
   color: var(--text);
   font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
   min-height: 100vh;
@@ -35,6 +37,11 @@ main {
   padding: 0 16px;
 }
 @media (max-width: 960px) { main { grid-template-columns: 1fr; } }
+@media (max-width: 480px) {
+  header h1 { font-size: 2.4rem; }
+  .panel { padding: 16px; }
+  main { gap: 12px; margin-top: 12px; }
+}
 
 .panel {
   background: var(--panel);
@@ -58,7 +65,15 @@ main {
 .cps { color: var(--accent); margin-top: 6px; font-size: 0.9rem; }
 
 .chip {
+  font: inherit;
+  color: inherit;
   width: 230px; height: 230px;
+  flex-shrink: 0;
+  margin: 14px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
   background: linear-gradient(145deg, #1b2a44, #101b2e);
   border: 2px solid #2c4166;
   border-radius: 18px;
@@ -78,6 +93,8 @@ main {
 }
 .chip::after { transform: rotate(90deg); }
 .chip:active { transform: scale(0.95); }
+.chip:focus-visible, .btn:focus-visible, .shop-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.click-upgrade { width: 100%; }
 .chip-die {
   position: absolute; inset: 40px;
   background: linear-gradient(160deg, #23375c, #16233c);
@@ -118,9 +135,9 @@ main {
 .up-name, .item-name { font-weight: 700; grid-column: 1; grid-row: 1; }
 .up-effect, .item-effect { color: var(--dim); font-size: 0.78rem; grid-column: 1; grid-row: 2; }
 .up-cost { color: var(--gold); grid-column: 2; grid-row: 1 / span 2; align-self: center; font-size: 0.85rem; }
-.item-cost { color: var(--gold); grid-column: 3; grid-row: 1 / span 2; align-self: center; font-size: 0.85rem; }
+.item-cost { color: var(--gold); grid-column: 3; text-align: right; min-width: 4.5em; grid-row: 1 / span 2; align-self: center; font-size: 0.85rem; }
 .item-count { color: var(--accent-2); font-size: 0.9rem; grid-column: 2; grid-row: 1 / span 2; align-self: center; min-width: 2.2em; text-align: right; }
-.shop-item { grid-template-columns: 1fr auto auto; margin-bottom: 8px; font: inherit; color: var(--text); }
+.shop-item { grid-template-columns: 1fr auto auto; margin-bottom: 8px; font: inherit; color: var(--text); touch-action: manipulation; }
 .shop-item:disabled { opacity: 0.45; cursor: default; }
 
 /* ------- prestige ------- */
@@ -130,8 +147,11 @@ main {
 .prestige-info { color: var(--dim); font-size: 0.75rem; margin-top: 6px; }
 
 /* ------- side panel ------- */
-.leaderboard { list-style-position: inside; margin-bottom: 20px; }
-.leaderboard li { padding: 5px 4px; border-bottom: 1px dashed var(--panel-edge); font-size: 0.85rem; display: flex; justify-content: space-between; }
+.leaderboard { list-style: none; margin-bottom: 6px; }
+.leaderboard li { padding: 5px 4px; border-bottom: 1px dashed var(--panel-edge); font-size: 0.85rem; display: flex; gap: 8px; }
+.lb-rank { color: var(--dim); min-width: 2em; }
+.lb-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lb-note { font-size: 0.7rem; margin-bottom: 20px; }
 .leaderboard li:first-child .lb-name { color: var(--gold); }
 .lb-score { color: var(--accent); }
 .stats { list-style: none; }
@@ -139,6 +159,19 @@ main {
 .stats span { color: var(--text); }
 .save-status { margin-top: 14px; font-size: 0.75rem; }
 .dim { color: var(--dim); }
+.btn.link { background: none; border: none; padding: 4px 0; color: var(--dim); font-size: 0.75rem; text-decoration: underline; }
+.btn.link.danger { margin-top: 10px; }
+.btn.link.danger:hover { color: var(--danger); }
+
+footer { text-align: center; font-size: 0.7rem; padding: 0 16px 28px; max-width: 640px; margin: 0 auto; }
+
+.toast {
+  position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%);
+  width: max-content; max-width: calc(100vw - 32px);
+  background: #13233a; border: 1px solid var(--accent); color: var(--text);
+  border-radius: 10px; padding: 10px 16px; font-size: 0.85rem; z-index: 20;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5);
+}
 
 /* ------- floating click numbers ------- */
 #float-layer { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }

@@ -114,8 +114,9 @@ function cleanState(raw) {
     cycles: cleanNumber(raw.cycles),
     totalCycles: cleanNumber(raw.totalCycles),
     clickLevel: Math.min(1000, Math.floor(cleanNumber(raw.clickLevel))),
-    architectures: Math.min(1e6, Math.floor(cleanNumber(raw.architectures))),
+    architectures: Math.floor(cleanNumber(raw.architectures)),
     buildings,
+    savedAt: Math.min(Date.now(), cleanNumber(raw.savedAt)),
   };
 }
 

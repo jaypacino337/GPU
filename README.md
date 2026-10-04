@@ -1,6 +1,6 @@
-# CSTR — chip strategy
+# CSTR — Chip Strategy
 
-Microchips are the new gold. Mine chips by clicking the die, spend them on
+Compute is the new gold. Mine chips by clicking the die, spend them on
 mining hardware that generates chips automatically, overclock your click
 power, and eventually tape out a **next-gen chip** for a permanent output
 bonus. A global leaderboard ranks players by lifetime chips mined.
@@ -8,15 +8,38 @@ bonus. A global leaderboard ranks players by lifetime chips mined.
 ## How it works
 
 - **Click the chip** → mine chips (starts at 1 per click).
-- **Mining hardware** → 8 buildings from USB Miner (+1/sec) to Mega
-  Datacenter (+60K/sec). Each purchase raises that building's next price
+- **Compute hardware** → 8 buildings from USB Miner (+1/sec) to
+  Superintelligence Lab (+60K/sec). Each purchase raises that building's next price
   by 15%.
 - **Overclock** → doubles chips per click each level, cost grows 6× per level.
 - **Next-Gen Chip (prestige)** → every 10M lifetime chips earns one
   generation point. Resetting grants +10% permanent output per point.
-- **Leaderboard** → top 10 players by lifetime chips, refreshed live.
-- Progress autosaves to the server every 15s (and to localStorage as a
-  fallback, so it works offline too).
+- **Offline earnings** → idle production is credited for time away (max 8h).
+- **Progress** lives in the browser (localStorage, saved every 5s and when the
+  tab is hidden). Nothing is real: no token, no wallet, no actual mining.
+- **Leaderboard (optional)** → only when served by the bundled Node server
+  (Docker / `npm start`). Scores are self-reported by each browser and are
+  labelled as unverified in the UI. On static hosting (Vercel) the game
+  detects that `/api` is missing and runs single-player.
+
+## Deploy to Vercel (static, zero setup)
+
+`public/` is a complete static site. `vercel.json` pins Vercel to serve it
+as-is (no framework, no build, no install) and adds security headers;
+`.vercelignore` keeps `server.js` out so Vercel never turns it into a
+serverless function (its JSON-file datastore would not persist there).
+
+```bash
+npm i -g vercel
+vercel          # first run: link/create the project, accept the defaults
+vercel --prod
+```
+
+Or in the dashboard: **Add New → Project → import the repo**, pick this
+branch, leave Framework Preset / Build / Output on their defaults (they are
+overridden by `vercel.json`) and **Deploy**. After the first deploy, set the
+`og:image` / `twitter:image` tags in `public/index.html` to the absolute URL
+(`https://<your-domain>/og.png`) so link previews render everywhere.
 
 ## Stack
 
@@ -38,7 +61,7 @@ npm start
 # open http://localhost:3000
 ```
 
-## Run in production
+## Run in production (with leaderboard)
 
 The server is production-hardened out of the box: security headers + CSP,
 per-IP API rate limiting, request size limits, `trust proxy` for hosts

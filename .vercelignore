@@ -1,0 +1,8 @@
+# Vercel serves public/ as a static site. The Node server (leaderboard) is for
+# Docker / self-hosting only — keep it out so Vercel never tries to run it as
+# a serverless function with a non-persistent filesystem.
+server.js
+scripts/
+Dockerfile
+data/
+node_modules/
