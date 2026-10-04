@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "admin": "node scripts/admin.js"
+    "admin": "node scripts/admin.js",
+    "test": "node --test test/*.test.js",
+    "export-rewards": "node scripts/export-rewards.js"
   },
   "engines": {
     "node": ">=18"
