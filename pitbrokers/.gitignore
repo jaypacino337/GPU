@@ -1,0 +1,12 @@
+target/
+node_modules/
+.next/
+.env
+.env.local
+.anchor/
+test-ledger/
+dist/
+.env.local
+next-env.d.ts
+*.tsbuildinfo
+assets/
