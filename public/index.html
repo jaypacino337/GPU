@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CSTR — Chip Strategy · arcade idle miner</title>
-  <meta name="description" content="CSTR — Chip Strategy: an arcade idle clicker with a verified global leaderboard. Mine chips, build the rig, link a Solana wallet, and the top players each season split $CSTR fees." />
+  <title>CSTR — Chip Strategy · compute epochs</title>
+  <meta name="description" content="CSTR — Chip Strategy: every 60 seconds, deploy free power onto 25 GPU racks. A provably fair draw picks one rack, and its miners take the round. Season CHIPs earn a share of $CSTR fees." />
   <meta name="theme-color" content="#0d0221" />
   <meta name="color-scheme" content="dark" />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
@@ -19,13 +19,13 @@
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="CSTR — Chip Strategy" />
   <meta property="og:title" content="CSTR — Chip Strategy" />
-  <meta property="og:description" content="Arcade idle miner with a verified leaderboard. Top players each season split $CSTR fees." />
+  <meta property="og:description" content="60-second compute epochs on 25 GPU racks. A provably fair draw picks one rack, and season CHIPs earn $CSTR fees." />
   <meta property="og:image" content="/og.png" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="CSTR — Chip Strategy" />
-  <meta name="twitter:description" content="Arcade idle miner with a verified leaderboard. Top players each season split $CSTR fees." />
+  <meta name="twitter:description" content="60-second compute epochs on 25 GPU racks. A provably fair draw picks one rack, and season CHIPs earn $CSTR fees." />
   <meta name="twitter:image" content="/og.png" />
 
   <link rel="stylesheet" href="style.css" />
@@ -35,11 +35,12 @@
   <div id="progress" class="scroll-progress" aria-hidden="true"></div>
 
   <header id="nav" class="nav">
-    <a class="logo" href="#play" aria-label="CSTR home"><span class="logo-chip" aria-hidden="true"></span>CSTR</a>
+    <a class="logo" href="#mine" aria-label="CSTR home"><span class="logo-chip" aria-hidden="true"></span>CSTR</a>
     <nav class="nav-links" aria-label="Sections">
-      <a href="#play">Play</a>
-      <a href="#board">Board</a>
+      <a href="#mine">Mine</a>
+      <a href="#leaders">Leaders</a>
       <a href="#rewards">Rewards</a>
+      <a href="#fair">Fairness</a>
       <a href="#faq">FAQ</a>
     </nav>
     <div class="nav-actions">
@@ -49,8 +50,8 @@
   </header>
 
   <main>
-    <!-- ============================================================ PLAY -->
-    <section id="play" class="hero">
+    <!-- ============================================================ MINE -->
+    <section id="mine" class="hero">
       <div class="horizon" aria-hidden="true">
         <div class="sun"></div>
         <div class="grid-floor"></div>
@@ -62,62 +63,82 @@
           <span class="split" data-split>CHIP</span>
           <span class="split split-alt" data-split>STRATEGY</span>
         </h1>
-        <p class="lede">Mine chips. Build the rig. Climb a leaderboard the server verifies. Each season, the top players split <b>$CSTR</b> fees.</p>
+        <p class="lede">Every 60 seconds a compute epoch closes. Put free power ⚡ on any of the 25 GPU racks. A provably fair draw picks one rack, and its miners take the round. Season <b>CHIPs</b> earn a share of $CSTR fees.</p>
       </div>
 
       <div class="cabinet">
-        <!-- left: the chip -->
-        <div class="panel play-panel">
-          <div class="hud">
-            <div class="hud-main">
-              <div id="cycles" class="score" aria-live="off">0</div>
-              <div class="score-unit">chips</div>
+        <!-- left: the board -->
+        <div class="panel board-panel">
+          <div class="epoch-hud">
+            <div class="hud-cell"><span class="k">epoch</span><span id="epoch-id" class="v">—</span></div>
+            <div class="hud-cell timer-cell">
+              <span class="k">closes in</span>
+              <span id="epoch-timer" class="v big">—</span>
+              <span class="timer-bar" aria-hidden="true"><span id="timer-fill"></span></span>
             </div>
-            <div class="hud-row">
-              <div class="hud-cell"><span class="k">per sec</span><span id="cps" class="v">0</span></div>
-              <div class="hud-cell"><span class="k">season</span><span id="season-score" class="v">—</span></div>
-              <div class="hud-cell"><span class="k">rank</span><span id="my-rank" class="v">—</span></div>
+            <div class="hud-cell"><span class="k">deployed</span><span id="epoch-total" class="v">—</span></div>
+            <div class="hud-cell"><span class="k">miners</span><span id="epoch-miners" class="v">—</span></div>
+          </div>
+
+          <div class="grid-wrap">
+            <div id="grid" class="grid" role="group" aria-label="GPU racks: pick where to deploy"></div>
+            <div id="grid-overlay" class="grid-overlay hidden" aria-live="polite">
+              <p class="eyebrow">sampling randomness</p>
+              <p id="overlay-text" class="overlay-text">drand round —</p>
             </div>
           </div>
 
-          <div class="chip-stage">
-            <div id="combo" class="combo" aria-hidden="true"></div>
-            <button id="chip" class="chip" type="button" aria-label="Mine a chip">
-              <span class="chip-pins" aria-hidden="true"></span>
-              <span class="chip-die">
-                <span class="chip-label">CSTR</span>
-                <span id="chip-ghz" class="chip-ghz">1.0 GHz</span>
-              </span>
-            </button>
-            <div id="fx-layer" class="fx-layer" aria-hidden="true"></div>
-          </div>
-
-          <div class="upgrades">
-            <button id="overclock-btn" class="btn btn-up" type="button">
-              <span class="up-name">Overclock <span id="oc-level"></span></span>
-              <span class="up-effect">chips per click ×2</span>
-              <span id="oc-cost" class="up-cost"></span>
-            </button>
-            <button id="prestige-btn" class="btn btn-gen" type="button" disabled>
-              <span class="up-name" id="prestige-name">Next-Gen Chip</span>
-              <span id="prestige-info" class="up-effect"></span>
-            </button>
+          <div class="deploy-bar">
+            <div class="amount">
+              <label for="amount" class="k">⚡ per rack</label>
+              <div class="stepper">
+                <button class="step" type="button" data-step="-10" aria-label="minus 10">−</button>
+                <input id="amount" type="number" inputmode="numeric" min="1" max="1000" value="10" />
+                <button class="step" type="button" data-step="10" aria-label="plus 10">+</button>
+              </div>
+            </div>
+            <div class="quick">
+              <button class="pill" type="button" id="pick-all">All 25</button>
+              <button class="pill" type="button" id="pick-none">Clear</button>
+              <button class="pill" type="button" id="pick-max">Max ⚡</button>
+            </div>
+            <button id="deploy-btn" class="btn btn-hot deploy-btn" type="button" disabled>Pick racks</button>
           </div>
           <p id="save-status" class="status-line">booting…</p>
         </div>
 
-        <!-- right: hardware shop -->
-        <div class="panel shop-panel">
-          <div class="panel-head">
-            <h2>Hardware</h2>
-            <span class="muted small">+15% price each</span>
+        <!-- right: you + the jackpot -->
+        <div class="panel side">
+          <div class="power">
+            <div class="power-top">
+              <span class="k">your power</span>
+              <span id="power" class="power-v">—</span>
+            </div>
+            <span class="meter" aria-hidden="true"><span id="power-fill"></span></span>
+            <span id="power-note" class="muted small">+10 ⚡/min while you're online, up to 600</span>
           </div>
-          <div id="shop" class="shop"></div>
+
+          <div class="card glow-border jackpot">
+            <p class="eyebrow">motherlode</p>
+            <p id="motherlode" class="jackpot-v">—</p>
+            <p class="muted small">CHIP jackpot. Grows +0.2 every epoch and hits 1 in 500. When it hits, it's split by power on the winning rack.</p>
+          </div>
+
+          <div class="result" id="result">
+            <p class="k">last epoch</p>
+            <p id="result-text" class="result-text">Deploy to start mining.</p>
+          </div>
+
+          <div class="recent-wrap">
+            <p class="k">recent winning racks</p>
+            <ol id="recent" class="recent" aria-label="Recent winning racks"></ol>
+          </div>
+
           <ul class="mini-stats">
-            <li><span>lifetime</span><b id="stat-total">0</b></li>
-            <li><span>per click</span><b id="stat-click">1</b></li>
-            <li><span>generation</span><b id="stat-arch">0</b></li>
-            <li><span>multiplier</span><b id="stat-mult">×1</b></li>
+            <li><span>season</span><b id="season-score">—</b></li>
+            <li><span>rank</span><b id="my-rank">—</b></li>
+            <li><span>epochs</span><b id="stat-epochs">0</b></li>
+            <li><span>wins</span><b id="stat-wins">0</b></li>
           </ul>
         </div>
       </div>
@@ -126,28 +147,28 @@
     <!-- ========================================================= TICKER -->
     <div class="ticker" aria-label="Live stats">
       <div class="ticker-track" id="ticker">
-        <span>players <b data-stat="players">—</b></span>
+        <span>miners <b data-stat="players">—</b></span>
         <span>wallets linked <b data-stat="linked">—</b></span>
-        <span>mining this season <b data-stat="active">—</b></span>
-        <span>chips mined this season <b data-stat="seasonChips">—</b></span>
+        <span>epochs settled <b data-stat="settled">—</b></span>
+        <span>power burned <b data-stat="burned">—</b></span>
+        <span>CHIP mined this season <b data-stat="seasonChips">—</b></span>
         <span>paid seats <b data-stat="top">—</b></span>
-        <span>click cap <b data-stat="maxCps">—</b> cps</span>
       </div>
     </div>
 
     <!-- ===================================================== LEADERBOARD -->
-    <section id="board" class="section">
+    <section id="leaders" class="section">
       <div class="section-head reveal">
         <p class="eyebrow">High scores</p>
         <h2 class="h2">Season leaderboard</h2>
-        <p class="muted">Every chip here was replayed and counted by the server, not reported by a browser. <span class="tag tag-pay">PAID</span> marks players currently inside the reward zone.</p>
+        <p class="muted">Ranked by CHIPs mined this season. Every epoch is settled by the server and can be re-checked by anyone. <span class="tag tag-pay">PAID</span> marks players currently inside the reward zone.</p>
       </div>
       <div class="board-wrap reveal">
         <ol id="leaderboard" class="leaderboard"><li class="lb-empty">loading…</li></ol>
         <aside class="card glow-border link-card">
           <h3>Get on the payout list</h3>
           <ol class="steps-mini">
-            <li>Pick a handle and mine.</li>
+            <li>Pick a handle and deploy power.</li>
             <li>Link a Solana wallet (one free signature, no transaction).</li>
             <li>Finish the season in the top <b data-cfg="top">—</b>.</li>
           </ol>
@@ -161,23 +182,23 @@
     <section id="rewards" class="section">
       <div class="section-head reveal">
         <p class="eyebrow">Insert coin</p>
-        <h2 class="h2">How rewards work</h2>
+        <h2 class="h2">How an epoch pays</h2>
       </div>
       <div class="cards reveal-group">
         <article class="card spot reveal">
           <span class="card-num">01</span>
-          <h3>Play</h3>
-          <p>Clicks, upgrades and hardware go to the server as inputs. It replays them with the same rules your browser runs and its own clock. Clicking is capped at <b data-cfg="maxCps">20</b> per second.</p>
+          <h3>Deploy</h3>
+          <p>Spread free power ⚡ over any racks before the epoch closes. Power is free and regenerates while you play. It's never bought or sold, and it has no cash value.</p>
         </article>
         <article class="card spot reveal">
           <span class="card-num">02</span>
-          <h3>Link</h3>
-          <p>Connect Phantom and sign a one-time message. The server checks the ed25519 signature. Each wallet links to one player, and you can switch wallets once a day.</p>
+          <h3>Draw</h3>
+          <p>One rack wins. Its miners get the power from the other 24 racks, minus a 10% burn, split by stake. They also get +1 CHIP: half the epochs split it, the other half send it to one top miner.</p>
         </article>
         <article class="card spot reveal">
           <span class="card-num">03</span>
           <h3>Earn</h3>
-          <p>When the week ends, the top <b data-cfg="top">—</b> linked players (at least <b data-cfg="minScore">—</b> season chips) split the $CSTR fee pot, weighted by <b data-cfg="weight">—</b> of their score. The list is public.</p>
+          <p>When the week ends, the top <b data-cfg="top">—</b> linked miners (at least <b data-cfg="minScore">—</b> CHIP) share the $CSTR fee pot by CHIPs mined. Motherlode winners get a separate fee-funded jackpot. All of it is on the public list.</p>
         </article>
       </div>
 
@@ -194,8 +215,30 @@
             <a id="buy-link" class="btn btn-hot hidden" href="#" target="_blank" rel="noopener noreferrer">Buy $CSTR</a>
           </div>
         </div>
-        <a class="audit-link" href="/rewards">Audit the live payout list →</a>
       </div>
+    </section>
+
+    <!-- ======================================================== FAIRNESS -->
+    <section id="fair" class="section">
+      <div class="section-head reveal">
+        <p class="eyebrow">No house edge on the draw</p>
+        <h2 class="h2">Provably fair, every epoch</h2>
+      </div>
+      <div class="cards reveal-group">
+        <article class="card spot reveal">
+          <h3>Committed</h3>
+          <p>Every seed comes from a hash chain fixed when the game launched. The commit for each epoch is shown before it opens, so the server can't choose a seed once deploys are in.</p>
+        </article>
+        <article class="card spot reveal">
+          <h3>Unpredictable</h3>
+          <p>The seed is mixed with the <b>drand</b> beacon round published after the epoch closes. drand is signed by the League of Entropy, and nobody, including this server, knows it in advance.</p>
+        </article>
+        <article class="card spot reveal">
+          <h3>Checkable</h3>
+          <p>After settlement the seed, drand round and signature are published. The audit page recomputes the winning rack in your browser from drand's own API.</p>
+        </article>
+      </div>
+      <a class="audit-link reveal" href="/rewards">Open the payout list and fairness audit →</a>
     </section>
 
     <!-- ============================================================= FAQ -->
@@ -205,18 +248,18 @@
         <h2 class="h2">FAQ</h2>
       </div>
       <div class="faq reveal-group">
-        <details class="reveal"><summary>Can I bot or edit my save?</summary><p>No. Your browser only sends inputs. The server works out idle income from its own clock, refuses purchases you can't afford, and drops clicks above the cap. Sustained clicking at the cap, or flooding past it, flags the account. Flagged accounts can still play but are left off the payout list until they're reviewed.</p></details>
-        <details class="reveal"><summary>What happened to my old save?</summary><p>Saves from before seasons were reported by the browser, so nobody could verify them. Your lifetime total is kept as a legacy badge, and your run restarts under verified rules.</p></details>
-        <details class="reveal"><summary>Do I need to hold $CSTR?</summary><p>Not for the leaderboard pot. The operator can also run a holders-and-players round, which pays only wallets that are both on the top list and hold $CSTR, weighted by balance. Each round's rules are posted before it's paid.</p></details>
+        <details class="reveal"><summary>Is this gambling? Do I risk money?</summary><p>No. You play with free power that can't be bought, sold or withdrawn. Rewards come from $CSTR trading fees and go to the season's top miners. A version where you stake real SOL is a separate decision and isn't live.</p></details>
+        <details class="reveal"><summary>Can the server rig the draw?</summary><p>No. The server is locked into its seeds in advance by a hash chain, and the drand round it mixes in doesn't exist until after the epoch closes. If drand can't be reached within 5 minutes, the epoch is void and every deploy is refunded.</p></details>
+        <details class="reveal"><summary>Can I bot it?</summary><p>All deploys are checked on the server against your real power. Power only regenerates while you're online and is capped. One handle per wallet, one wallet per handle, and sign-ups are rate-limited. Accounts that look like farms are flagged and left off the payout list until they're reviewed.</p></details>
+        <details class="reveal"><summary>What happened to the clicker?</summary><p>CSTR is now compute epochs. Your handle, tag and linked wallet carried over. Your old clicker total is kept as a legacy badge, and the new season score is CHIPs mined.</p></details>
         <details class="reveal"><summary>Does linking a wallet cost anything?</summary><p>No. You sign a plain text message, which sends no transaction and costs no fee. This site never asks for a seed phrase or private key. If anything does, close it.</p></details>
-        <details class="reveal"><summary>When does a season end?</summary><p>Seasons are weekly, in UTC. The countdown at the top shows the time left. Your game keeps going between seasons, but the season score starts again from zero.</p></details>
       </div>
     </section>
   </main>
 
   <footer class="footer">
     <p class="logo small-logo"><span class="logo-chip" aria-hidden="true"></span>CSTR</p>
-    <p class="muted small">Chips, hardware and GHz are game numbers, not tokens. $CSTR rewards come from trading fees, are paid at the operator's discretion, and can change or stop at any time. Nothing here is financial advice or an investment offer.</p>
+    <p class="muted small">Power ⚡ and CHIP are free in-game units: they aren't purchasable, transferable or redeemable. $CSTR rewards come from trading fees, are paid at the operator's discretion, and can change or stop at any time. Nothing here is financial advice or an investment offer.</p>
   </footer>
 
   <!-- Name gate -->
@@ -224,10 +267,10 @@
     <div class="modal-card">
       <p class="eyebrow">Player 1</p>
       <h2 id="name-title" class="h2 small-h">Enter your handle</h2>
-      <p class="muted">You need a handle for the season leaderboard and payouts.</p>
+      <p class="muted">You need a handle to deploy power and climb the season board. You start with 300 ⚡.</p>
       <input id="name-input" maxlength="20" placeholder="CHIPBARON" autocomplete="off" aria-label="Handle" />
       <button id="name-submit" class="btn btn-hot" type="button">Press start</button>
-      <button id="name-skip" class="btn btn-link" type="button">Play offline (no leaderboard)</button>
+      <button id="name-skip" class="btn btn-link" type="button">Just watch for now</button>
       <p id="name-error" class="error hidden"></p>
     </div>
   </div>
@@ -246,17 +289,7 @@
     </div>
   </div>
 
-  <!-- Another tab took the session -->
-  <div id="tab-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="tab-title">
-    <div class="modal-card">
-      <h2 id="tab-title" class="h2 small-h">Game open elsewhere</h2>
-      <p class="muted">Your game is running in another tab or device. Only one can mine at a time.</p>
-      <button id="tab-resume" class="btn btn-hot" type="button">Play here</button>
-    </div>
-  </div>
-
   <div id="toast" class="toast hidden" role="status"></div>
-  <div id="float-layer" class="float-layer" aria-hidden="true"></div>
 
   <script src="rules.js"></script>
   <script src="game.js"></script>

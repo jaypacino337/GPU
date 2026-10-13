@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Payout list — CSTR Chip Strategy</title>
-  <meta name="description" content="The public, auditable $CSTR reward list: the top linked players of each CSTR season with their wallet and weight." />
+  <title>Payouts and fairness — CSTR Chip Strategy</title>
+  <meta name="description" content="The public CSTR audit: who gets paid from $CSTR fees each season, motherlode winners, and a provably fair check of every compute epoch against drand." />
   <meta name="theme-color" content="#0d0221" />
   <meta name="color-scheme" content="dark" />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
@@ -24,11 +24,11 @@
   <header id="nav" class="nav">
     <a class="logo" href="/" aria-label="CSTR home"><span class="logo-chip" aria-hidden="true"></span>CSTR</a>
     <nav class="nav-links" aria-label="Sections">
-      <a href="/#play">Play</a>
-      <a href="/#board">Board</a>
-      <a href="/#rewards">Rewards</a>
+      <a href="/#mine">Mine</a>
+      <a href="/#leaders">Leaders</a>
+      <a href="#fairness">Fairness</a>
     </nav>
-    <div class="nav-actions"><a class="pill pill-hot" href="/#play">Play now</a></div>
+    <div class="nav-actions"><a class="pill pill-hot" href="/#mine">Mine now</a></div>
   </header>
 
   <main>
@@ -36,8 +36,8 @@
       <div class="horizon" aria-hidden="true"><div class="grid-floor"></div></div>
       <div class="hero-head">
         <p class="eyebrow"><span class="dot"></span> public audit</p>
-        <h1 class="title title-sm"><span class="split" data-split>PAYOUT</span> <span class="split split-alt" data-split>LIST</span></h1>
-        <p class="lede">Who gets paid and how much. This list is generated from server-verified scores and is the same file the airdrop runs on.</p>
+        <h1 class="title title-sm"><span class="split" data-split>PAYOUT</span> <span class="split split-alt" data-split>AUDIT</span></h1>
+        <p class="lede">Who gets paid, and proof that every draw was fair. These lists are the same files the airdrop runs on, and any epoch can be re-checked in your browser against drand.</p>
       </div>
     </section>
 
@@ -63,13 +63,45 @@
       <div class="cards cards-2 reveal-group">
         <article class="card spot reveal">
           <h3>Who's eligible</h3>
-          <p>You need a linked wallet (verified signature), no anti-cheat flag, and at least <b data-cfg="minScore">—</b> verified chips this season. The top <b data-cfg="top">—</b> make the list. <b>Share</b> is each wallet's cut of a pro-rata payout before any per-wallet cap.</p>
+          <p>You need a linked wallet (verified signature), no review flag, and at least <b data-cfg="minScore">—</b> CHIP mined in compute epochs this season. The top <b data-cfg="top">—</b> make the list. <b>Share</b> is each wallet's cut of a pro-rata payout before any per-wallet cap.</p>
         </article>
         <article class="card spot reveal">
           <h3>How it's paid</h3>
-          <p>The operator exports this list and runs the memcoinz airdrop: pro-rata by weight, or a lottery seeded with the season number. Every batch signature goes into a ledger that can't double-pay.</p>
+          <p>The operator exports this list and runs the memcoinz airdrop from the fee-funded rewards wallet, pro-rata by CHIPs mined. Motherlode hits get their own payout from the motherlode wallet. Every batch signature goes into a ledger that can't double-pay.</p>
         </article>
       </div>
+    </section>
+
+    <section id="motherlodes" class="section section-tight">
+      <div class="section-head reveal">
+        <p class="eyebrow">Jackpots</p>
+        <h2 class="h2">Motherlode hits</h2>
+        <p class="muted">Each hit pays the miners on the winning rack, by the power they had there. Each one gets its own fee-funded payout list.</p>
+      </div>
+      <ol id="ml-list" class="ml-list reveal"><li class="lb-empty">loading…</li></ol>
+    </section>
+
+    <section id="fairness" class="section section-tight">
+      <div class="section-head reveal">
+        <p class="eyebrow">Provably fair</p>
+        <h2 class="h2">Check any epoch yourself</h2>
+        <p class="muted">Each epoch's seed is fixed in advance by a hash chain. The server publishes that chain's last link, the <b>anchor</b>, before play, and every revealed seed hashes back to it. The seed is mixed with the <a href="https://drand.love" target="_blank" rel="noopener noreferrer">drand</a> quicknet round published after the epoch closes, which no one can know in advance. <b>Verify</b> fetches that round straight from drand and recomputes the winning rack in your browser.</p>
+      </div>
+      <div class="card glow-border fair-card reveal">
+        <dl class="kv">
+          <dt>chain anchor</dt><dd id="f-anchor" class="mono">—</dd>
+          <dt>chain starts at epoch</dt><dd id="f-genesis">—</dd>
+          <dt>beacon</dt><dd id="f-beacon">—</dd>
+          <dt>formula</dt><dd class="mono">value = sha256("CSTR-epoch:" + epoch ‖ seed ‖ sha256(drand signature)); rack = u64(value[0..8]) mod 25</dd>
+        </dl>
+      </div>
+      <div class="table-wrap card reveal">
+        <table class="audit epochs">
+          <thead><tr><th>Epoch</th><th>Rack</th><th>drand round</th><th class="num">Miners</th><th class="num">⚡ in</th><th>Check</th></tr></thead>
+          <tbody id="epoch-body"><tr><td colspan="6" class="muted">loading…</td></tr></tbody>
+        </table>
+      </div>
+      <p class="muted small reveal">For a full check, including drand's BLS signature, run <code>npm run verify-epoch -- &lt;site&gt; &lt;epoch&gt;</code> from the repo. It trusts nothing this server says.</p>
     </section>
   </main>
 
@@ -77,6 +109,7 @@
     <p class="muted small">Rewards come from $CSTR trading fees, are paid at the operator's discretion, and can change or stop. Not financial advice.</p>
   </footer>
   <div id="toast" class="toast hidden" role="status"></div>
+  <script src="rules.js"></script>
   <script src="rewards.js"></script>
 </body>
 </html>

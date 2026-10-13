@@ -28,8 +28,9 @@ const sid = engine.seasonAt(Date.now(), cfg.engine).id;
 
 const fmtNum = (n) => Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
 const fmtDate = (ts) => (ts ? new Date(ts).toISOString().slice(0, 16).replace('T', ' ') : '-');
+const chips = (n) => (n / 1e6).toLocaleString('en-US', { maximumFractionDigits: 3 });
 const line = (id, p) =>
-  `${id}  ${p.name.padEnd(20)} ${fmtNum(engine.seasonScore(p, sid)).padStart(16)} s${sid}  ` +
+  `${id}  ${p.name.padEnd(20)} ${chips(engine.seasonScore(p, sid)).padStart(12)} CHIP s${sid}  ` +
   `${p.wallet ? p.wallet.address : '(no wallet)'.padEnd(44)}  ${p.integrity.flagged ? 'FLAGGED: ' + p.integrity.reasons.join('; ') : ''}`;
 
 function write(msg) {
@@ -51,12 +52,14 @@ switch (cmd) {
     const active = entries.filter(([, p]) => Date.now() - p.updatedAt < 86400000).length;
     const linked = entries.filter(([, p]) => p.wallet).length;
     const flagged = entries.filter(([, p]) => p.integrity.flagged).length;
-    const chips = entries.reduce((s, [, p]) => s + engine.seasonScore(p, sid), 0);
+    const total = entries.reduce((s, [, p]) => s + engine.seasonScore(p, sid), 0);
     console.log(`players:            ${entries.length}`);
     console.log(`active last 24h:    ${active}`);
     console.log(`wallets linked:     ${linked}`);
     console.log(`flagged:            ${flagged}`);
-    console.log(`season ${sid} chips:    ${fmtNum(chips)}`);
+    console.log(`season ${sid} CHIP:     ${(total / 1e6).toFixed(3)}`);
+    console.log(`motherlode:         ${((store.board.motherlode || 0) / 1e6).toFixed(3)} CHIP`);
+    console.log(`epochs settled:     ${fmtNum((store.board.stats || {}).settled)} (void ${fmtNum((store.board.stats || {}).voided)})`);
     console.log(`datastore:          ${store.file}`);
     break;
   }
@@ -76,15 +79,13 @@ switch (cmd) {
   }
   case 'flagged': {
     const hits = entries.filter(([, p]) => p.integrity.flagged);
-    hits.forEach(([id, p]) =>
-      console.log(`${line(id, p)}\n      clicks ${fmtNum(p.integrity.clicks)} · dropped ${fmtNum(p.integrity.rejectedClicks)} · bot-like ${Math.round(p.integrity.botSec)}s`)
-    );
+    hits.forEach(([id, p]) => console.log(`${line(id, p)}\n      epochs ${p.totals.epochs} · wins ${p.totals.wins} · power ${p.power}`));
     if (!hits.length) console.log('nobody flagged');
     break;
   }
   case 'unflag': {
     const p = need();
-    p.integrity = { ...p.integrity, flagged: false, reasons: [], botSec: 0, rejectedClicks: 0 };
+    p.integrity = { flagged: false, reasons: [] };
     write(`cleared flag on ${p.name}`);
     break;
   }

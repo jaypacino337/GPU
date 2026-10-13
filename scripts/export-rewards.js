@@ -7,7 +7,9 @@
  *   node scripts/export-rewards.js --data-dir ./data                 # read the datastore directly
  *
  * Flags: --season last|current|<n> (default last = the week that just ended)
- *        --top 25  --weight sqrt|linear|rank|equal  --min 1000000
+ *        --top 25  --weight linear|sqrt|rank|equal  --min 1000000 (micro-CHIP)
+ *        --pot motherlode --epoch <id>   one motherlode hit's winners instead
+ *                                         (from --url only; list hits at /api/motherlodes)
  *        --out rewards/season-<n>.json
  */
 const fs = require('fs');
@@ -23,6 +25,8 @@ const { values: a } = parseArgs({
     weight: { type: 'string' },
     min: { type: 'string' },
     out: { type: 'string' },
+    pot: { type: 'string' },
+    epoch: { type: 'string' },
   },
 });
 
@@ -33,6 +37,10 @@ async function fromUrl() {
   if (a.top) u.searchParams.set('top', a.top);
   if (a.weight) u.searchParams.set('weight', a.weight);
   if (a.min) u.searchParams.set('min', a.min);
+  if (a.pot === 'motherlode') {
+    u.searchParams.set('pot', 'motherlode');
+    u.searchParams.set('epoch', a.epoch || '');
+  }
   const res = await fetch(u, { signal: AbortSignal.timeout(20000) });
   if (!res.ok) throw new Error(`${u} → HTTP ${res.status}`);
   return res.json();
@@ -60,15 +68,16 @@ function fromDisk() {
 
 (async () => {
   if (!a.url && !a['data-dir']) {
-    console.error('usage: export-rewards.js (--url <server> | --data-dir <dir>) [--season last] [--top 25] [--weight sqrt] [--min N] [--out file]');
+    console.error('usage: export-rewards.js (--url <server> | --data-dir <dir>) [--season last] [--top 25] [--weight linear] [--min N] [--pot motherlode --epoch <id>] [--out file]');
     process.exit(1);
   }
+  if (a.pot === 'motherlode' && !a.url) throw new Error('--pot motherlode needs --url');
   const snap = a.url ? await fromUrl() : fromDisk();
-  const out = a.out || path.join('rewards', `season-${snap.slot}.json`);
+  const out = a.out || path.join('rewards', a.pot === 'motherlode' ? `motherlode-${snap.slot}.json` : `season-${snap.slot}.json`);
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, JSON.stringify(snap, null, 2));
 
-  console.log(`season ${snap.slot} · ${snap.holderCount} recipients · weight ${snap.settings.weight} · total weight ${snap.eligibleRaw}`);
+  console.log(`${a.pot === 'motherlode' ? 'motherlode epoch' : 'season'} ${snap.slot} · ${snap.holderCount} recipients · weight ${snap.settings.weight} · total weight ${snap.eligibleRaw}`);
   for (const h of snap.holders.slice(0, 10)) console.log(`  ${h.owner}  w=${h.balanceRaw}  (${h.pctOfSupply}%)`);
   if (snap.holderCount > 10) console.log(`  … ${snap.holderCount - 10} more`);
   console.log(`\nwrote ${out}`);
