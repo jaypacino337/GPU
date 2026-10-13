@@ -1,117 +1,118 @@
 #!/usr/bin/env node
 /*
- * CSTR admin utility — inspect and manage the player datastore.
+ * CSTR admin utility: inspect and manage the player datastore.
  *
  *   node scripts/admin.js stats             overall numbers
- *   node scripts/admin.js top [n]           leaderboard (default 10)
+ *   node scripts/admin.js top [n]           this season's leaderboard (default 10)
  *   node scripts/admin.js find <name>       look up players by name
+ *   node scripts/admin.js flagged           players the anti-cheat excluded from rewards
+ *   node scripts/admin.js unflag <id>       clear a flag after review
+ *   node scripts/admin.js flag <id> [why]   exclude a player from rewards
  *   node scripts/admin.js remove <id>       delete one player by id
  *   node scripts/admin.js backup [dir]      timestamped copy of the datastore
  *
- * Writes go directly to the JSON file, so run `remove` while the server is
- * stopped (or restart it after) to avoid the server's in-memory copy
- * overwriting the change.
+ * Writes go directly to the JSON file, so run write commands while the server
+ * is stopped (or restart it after) or its in-memory copy will overwrite them.
  */
 const fs = require('fs');
 const path = require('path');
+const engine = require('../lib/engine');
+const { Store } = require('../lib/store');
+const { configFromEnv } = require('../server');
 
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..', 'data');
-const DB_FILE = path.join(DATA_DIR, 'players.json');
-
-function loadDb() {
-  try {
-    return JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-  } catch {
-    return {};
-  }
-}
-
-function saveDb(players) {
-  const tmp = DB_FILE + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(players));
-  fs.renameSync(tmp, DB_FILE);
-}
+const cfg = configFromEnv();
+const store = new Store(cfg.dataDir);
+const players = store.players;
+const entries = Object.entries(players);
+const sid = engine.seasonAt(Date.now(), cfg.engine).id;
 
 const fmtNum = (n) => Number(n || 0).toLocaleString('en-US', { maximumFractionDigits: 0 });
 const fmtDate = (ts) => (ts ? new Date(ts).toISOString().slice(0, 16).replace('T', ' ') : '-');
+const line = (id, p) =>
+  `${id}  ${p.name.padEnd(20)} ${fmtNum(engine.seasonScore(p, sid)).padStart(16)} s${sid}  ` +
+  `${p.wallet ? p.wallet.address : '(no wallet)'.padEnd(44)}  ${p.integrity.flagged ? 'FLAGGED: ' + p.integrity.reasons.join('; ') : ''}`;
 
-const [cmd, arg] = process.argv.slice(2);
-const players = loadDb();
-const entries = Object.entries(players);
+function write(msg) {
+  store.flush();
+  console.log(`${msg} — restart the server to pick this up`);
+}
+
+const [cmd, arg, ...rest] = process.argv.slice(2);
+const need = () => {
+  if (!arg || !players[arg]) {
+    console.error('no player with that id');
+    process.exit(1);
+  }
+  return players[arg];
+};
 
 switch (cmd) {
   case 'stats': {
-    const totals = entries.reduce(
-      (acc, [, p]) => {
-        acc.chips += p.state.totalCycles || 0;
-        acc.gens += p.state.architectures || 0;
-        return acc;
-      },
-      { chips: 0, gens: 0 }
-    );
     const active = entries.filter(([, p]) => Date.now() - p.updatedAt < 86400000).length;
+    const linked = entries.filter(([, p]) => p.wallet).length;
+    const flagged = entries.filter(([, p]) => p.integrity.flagged).length;
+    const chips = entries.reduce((s, [, p]) => s + engine.seasonScore(p, sid), 0);
     console.log(`players:            ${entries.length}`);
     console.log(`active last 24h:    ${active}`);
-    console.log(`chips mined (all):  ${fmtNum(totals.chips)}`);
-    console.log(`chip generations:   ${fmtNum(totals.gens)}`);
-    console.log(`datastore:          ${DB_FILE}`);
+    console.log(`wallets linked:     ${linked}`);
+    console.log(`flagged:            ${flagged}`);
+    console.log(`season ${sid} chips:    ${fmtNum(chips)}`);
+    console.log(`datastore:          ${store.file}`);
     break;
   }
-
   case 'top': {
     const n = Math.max(1, parseInt(arg, 10) || 10);
-    const top = entries
-      .sort(([, a], [, b]) => (b.state.totalCycles || 0) - (a.state.totalCycles || 0))
-      .slice(0, n);
-    for (const [i, [, p]] of top.entries()) {
-      console.log(
-        `${String(i + 1).padStart(2)}. ${p.name.padEnd(20)} ` +
-          `${fmtNum(p.state.totalCycles).padStart(16)} chips   ` +
-          `gen ${p.state.architectures || 0}   last seen ${fmtDate(p.updatedAt)}`
-      );
-    }
+    const top = entries.sort(([, a], [, b]) => engine.seasonScore(b, sid) - engine.seasonScore(a, sid)).slice(0, n);
+    top.forEach(([id, p], i) => console.log(`${String(i + 1).padStart(3)}. ${line(id, p)}  last seen ${fmtDate(p.updatedAt)}`));
     if (!top.length) console.log('no players yet');
     break;
   }
-
   case 'find': {
-    if (!arg) exitUsage();
-    const needle = arg.toLowerCase();
-    const hits = entries.filter(([, p]) => p.name.toLowerCase().includes(needle));
-    for (const [id, p] of hits) {
-      console.log(`${id}  ${p.name.padEnd(20)} ${fmtNum(p.state.totalCycles).padStart(16)} chips   joined ${fmtDate(p.createdAt)}`);
-    }
+    if (!arg) usage();
+    const hits = entries.filter(([, p]) => p.name.toLowerCase().includes(arg.toLowerCase()) || (p.wallet && p.wallet.address === arg));
+    hits.forEach(([id, p]) => console.log(line(id, p)));
     if (!hits.length) console.log('no match');
     break;
   }
-
-  case 'remove': {
-    if (!arg) exitUsage();
-    if (!players[arg]) {
-      console.error('no player with that id');
-      process.exit(1);
-    }
-    const { name } = players[arg];
-    delete players[arg];
-    saveDb(players);
-    console.log(`removed ${name} (${arg}) — restart the server to pick this up`);
+  case 'flagged': {
+    const hits = entries.filter(([, p]) => p.integrity.flagged);
+    hits.forEach(([id, p]) =>
+      console.log(`${line(id, p)}\n      clicks ${fmtNum(p.integrity.clicks)} · dropped ${fmtNum(p.integrity.rejectedClicks)} · bot-like ${Math.round(p.integrity.botSec)}s`)
+    );
+    if (!hits.length) console.log('nobody flagged');
     break;
   }
-
+  case 'unflag': {
+    const p = need();
+    p.integrity = { ...p.integrity, flagged: false, reasons: [], botSec: 0, rejectedClicks: 0 };
+    write(`cleared flag on ${p.name}`);
+    break;
+  }
+  case 'flag': {
+    const p = need();
+    engine.flag(p, rest.join(' ') || 'manual review');
+    write(`flagged ${p.name}`);
+    break;
+  }
+  case 'remove': {
+    const p = need();
+    delete players[arg];
+    write(`removed ${p.name} (${arg})`);
+    break;
+  }
   case 'backup': {
-    const dir = arg || DATA_DIR;
+    const dir = arg || cfg.dataDir;
     fs.mkdirSync(dir, { recursive: true });
     const dest = path.join(dir, `players-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
-    fs.copyFileSync(DB_FILE, dest);
+    fs.copyFileSync(store.file, dest);
     console.log(`backed up ${entries.length} players to ${dest}`);
     break;
   }
-
   default:
-    exitUsage();
+    usage();
 }
 
-function exitUsage() {
-  console.error('usage: admin.js <stats | top [n] | find <name> | remove <id> | backup [dir]>');
+function usage() {
+  console.error('usage: admin.js <stats | top [n] | find <name|wallet> | flagged | flag <id> [why] | unflag <id> | remove <id> | backup [dir]>');
   process.exit(1);
 }

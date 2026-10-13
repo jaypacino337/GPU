@@ -1,104 +1,120 @@
 # CSTR — Chip Strategy
 
-Compute is the new gold. Mine chips by clicking the die, spend them on
-mining hardware that generates chips automatically, overclock your click
-power, and eventually tape out a **next-gen chip** for a permanent output
-bonus. A global leaderboard ranks players by lifetime chips mined.
+An arcade idle clicker with a **server-verified** global leaderboard. Each
+weekly season, the top players with linked wallets split $CSTR fees.
 
-## How it works
+- **Play:** click the chip to mine chips. Buy hardware (8 tiers, +15% price
+  each) for idle income, overclock to double each click, and tape out a
+  next-gen chip (prestige) for a permanent +10% per generation. Idle income
+  keeps accruing while you're away, up to 8h.
+- **Compete:** a weekly season score counts every chip the server verified.
+  The game itself keeps going between seasons.
+- **Earn:** link a Solana wallet with one Phantom signature. The top N linked
+  players are exported as `(wallet, weight)` for the memcoinz airdrop. See
+  [`docs/REWARDS.md`](docs/REWARDS.md).
 
-- **Click the chip** → mine chips (starts at 1 per click).
-- **Compute hardware** → 8 buildings from USB Miner (+1/sec) to
-  Superintelligence Lab (+60K/sec). Each purchase raises that building's next price
-  by 15%.
-- **Overclock** → doubles chips per click each level, cost grows 6× per level.
-- **Next-Gen Chip (prestige)** → every 10M lifetime chips earns one
-  generation point. Resetting grants +10% permanent output per point.
-- **Offline earnings** → idle production is credited for time away (max 8h).
-- **Progress** lives in the browser (localStorage, saved every 5s and when the
-  tab is hidden). Nothing is real: no token, no wallet, no actual mining.
-- **Leaderboard (optional)** → only when served by the bundled Node server
-  (Docker / `npm start`). Scores are self-reported by each browser and are
-  labelled as unverified in the UI. On static hosting (Vercel) the game
-  detects that `/api` is missing and runs single-player.
+## Anti-cheat model
 
-## Deploy to Vercel (static, zero setup)
+The browser never reports a score. It sends **inputs**, and the server replays
+them with the same rules module (`public/rules.js`) on its own clock
+(`lib/engine.js`):
 
-`public/` is a complete static site. `vercel.json` pins Vercel to serve it
-as-is (no framework, no build, no install) and adds security headers;
-`.vercelignore` keeps `server.js` out so Vercel never turns it into a
-serverless function (its JSON-file datastore would not persist there).
+| attack | what stops it |
+|---|---|
+| Edit localStorage / PUT a fake save | No such endpoint any more (`PUT` → 410). State only changes by replaying actions. |
+| Forge `"clicks: 1e9"` | Per-action max of 1000. Clicks come from a token bucket that refills at `MAX_CPS` (20) per real second and holds at most 15s worth. Excess clicks are dropped and counted. |
+| Autoclicker / bot | Clicks are capped as above. Sustained clicking at ≥85% of the cap for 15 min, or 20k dropped clicks, **flags** the account. Flagged players can still play but are left off the payout list until `npm run admin -- unflag <id>`. |
+| Fake idle time / client clock | Idle income uses the **server** time between syncs, capped at 8h offline. |
+| Buy what you can't afford | Purchases, overclock and prestige are checked against the server state. Refused actions are counted. |
+| Replay / double-submit / two tabs | One live session per player. Each batch has a sequence number, so a retried batch applies exactly once. A second tab takes over the session and the old one gets a 409. |
+| Steal someone's wallet / replay a signature | The link message carries a server-issued single-use nonce, an expiry (10 min), the player's name and tag. One wallet ↔ one player. Switching to a different wallet is allowed once per 24h, so top scores can't be rented out. |
+| Sign-up spam | Per-IP registration limit (`REG_LIMIT`/hour) on top of the general API limit. |
 
-```bash
-npm i -g vercel
-vercel          # first run: link/create the project, accept the defaults
-vercel --prod
-```
+Remaining risk: **multi-accounting**. One person can run several honest-pace
+accounts, each with its own wallet. The click cap and the bot flag make that
+slow, and idle income only grows with real time, but it can't be fully stopped
+off-chain. Mitigations: a meaningful `REWARDS_MIN_SCORE`, a per-wallet
+`--cap-bps`, reviewing `admin flagged` before each payout, and the
+holders ∩ players pot, which makes every extra account also buy $CSTR.
 
-Or in the dashboard: **Add New → Project → import the repo**, pick this
-branch, leave Framework Preset / Build / Output on their defaults (they are
-overridden by `vercel.json`) and **Deploy**. After the first deploy, set the
-`og:image` / `twitter:image` tags in `public/index.html` to the absolute URL
-(`https://<your-domain>/og.png`) so link previews render everywhere.
+Saves from before this version were self-reported. On first boot they migrate
+to v2: the run restarts under server rules and the old lifetime total is kept
+as display-only `legacyTotal`.
 
-## Stack
+## Wallet linking
 
-- **Backend**: Node.js + Express (`server.js`). REST API with a JSON-file
-  datastore (`data/players.json`, debounced atomic writes, flushed on
-  shutdown).
-  - `POST /api/players` — register, returns a secret player id
-  - `PUT /api/players/:id` — save game state (server-side validated)
-  - `GET /api/players/:id` — load game state
-  - `GET /api/leaderboard` — top 10 by lifetime chips
-  - `GET /healthz` — liveness probe for hosting platforms
-- **Frontend**: vanilla HTML/CSS/JS single page (`public/`), no build step.
+`POST /api/players/:id/wallet/challenge` returns a message. Phantom signs it
+(`signMessage`, which is free and sends no transaction). `POST
+/api/players/:id/wallet {wallet, signature}` then verifies the ed25519
+signature with `node:crypto`. A Solana address *is* the 32-byte public key;
+this is the same approach as memcoinz `seats-core.ts`. There are no private keys
+in the UI or on the server. On mobile without the extension, the button
+deep-links into Phantom's in-app browser.
 
-## Run locally
+## API
+
+| | |
+|---|---|
+| `POST /api/players {name}` | register → secret id (kept in localStorage) |
+| `POST /api/players/:id/session` | start/take over the live session, credits offline income |
+| `POST /api/players/:id/sync {session, seq, actions}` | replay a batch: `{t:'c',n}` clicks, `{t:'b',id}` buy, `{t:'o'}` overclock, `{t:'p'}` prestige |
+| `GET /api/players/:id` | your verified state |
+| `POST /api/players/:id/wallet/challenge`, `POST`/`DELETE /api/players/:id/wallet` | wallet link |
+| `GET /api/leaderboard?season=` | top 20 (wallets truncated, `rewarded` flag) |
+| `GET /api/rewards?season=&top=&weight=&min=&format=json\|csv\|snapshot` | payout list |
+| `GET /api/seats?mint=`, `POST /api/seats/sweep` | memcoinz guest-list protocol |
+| `GET /api/config`, `GET /api/stats`, `GET /healthz` | meta |
+
+## Configuration
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `PORT` / `HOST` | `3000` / `0.0.0.0` | listen address |
+| `DATA_DIR` | `./data` | datastore (`players.json`); **mount a volume here** |
+| `CSTR_MINT` | — | token mint: shown on the site, enforced on `/api/seats` |
+| `CSTR_BUY_URL` | — | "Buy $CSTR" button target |
+| `REWARDS_TOP` | `25` | paid seats per season |
+| `REWARDS_WEIGHT` | `sqrt` | `sqrt` / `linear` / `rank` / `equal` |
+| `REWARDS_MIN_SCORE` | `1000000` | minimum season chips to be paid |
+| `SEASON_DAYS` / `SEASON_START` | `7` / `2026-10-05T00:00:00Z` | season length and start |
+| `MAX_CPS` | `20` | click rate cap |
+| `RATE_LIMIT` / `REG_LIMIT` | `300`/min / `20`/h | per-IP API / sign-up limits |
+| `MAX_PLAYERS` | `100000` | registration cap |
+
+## Run
 
 ```bash
 npm install
-npm start
-# open http://localhost:3000
+npm test          # signature, anti-cheat engine, rewards export, HTTP end-to-end
+npm start         # http://localhost:3000
 ```
 
-## Run in production (with leaderboard)
+## Deploy (Railway: Docker + volume)
 
-The server is production-hardened out of the box: security headers + CSP,
-per-IP API rate limiting, request size limits, `trust proxy` for hosts
-behind a load balancer, a `/healthz` endpoint, and graceful shutdown that
-flushes pending saves.
+`railway.json` builds the `Dockerfile` and health-checks `/healthz`.
 
-Configuration (all optional, via environment variables):
+1. Railway → New service → this repo. The config-as-code file `railway.json` is picked up automatically.
+2. Add a **Volume** mounted at `/data` (the image sets `DATA_DIR=/data`).
+3. Variables: `RAILWAY_RUN_UID=0` (Railway volumes mount as root and the image
+   runs as `node`), plus `CSTR_MINT` / `CSTR_BUY_URL` / `REWARDS_*` once the
+   token exists.
+4. Saves are written atomically (tmp + rename) about 2s after each change and
+   flushed on SIGTERM, so redeploys don't lose progress. Back up with
+   `npm run admin -- backup` (or snapshot the Railway volume).
 
-| Variable      | Default        | Purpose                              |
-| ------------- | -------------- | ------------------------------------ |
-| `PORT`        | `3000`         | listen port                          |
-| `HOST`        | `0.0.0.0`      | bind address                         |
-| `DATA_DIR`    | `./data`       | where player saves are stored        |
-| `RATE_LIMIT`  | `300`          | API requests per minute per IP       |
-| `MAX_PLAYERS` | `100000`       | registration cap                     |
+The datastore is a single JSON file held in memory. That's fine for tens of
+thousands of players on one instance. **Don't scale to more than one replica**:
+sessions and the click bucket live in that process. Past that, move `lib/store.js`
+to Supabase (jsonb + `version` column, as in memcoinz `/deploy`).
 
-### Docker
+A static copy still deploys to Vercel (`vercel.json`), but there it runs
+**single-player** only: no leaderboard, wallet or rewards.
+
+## Admin
 
 ```bash
-docker build -t cstr .
-docker run -p 3000:3000 -v cstr-data:/data cstr
+npm run admin -- stats | top 20 | find <name|wallet> | flagged | unflag <id> | flag <id> [why] | remove <id> | backup
+npm run export-rewards -- --url https://<domain> --season last     # → rewards/season-<n>.json for mc airdrop
 ```
 
-The volume keeps player saves across deploys. Any platform that runs a
-Docker image or a Node app (Fly.io, Railway, Render, a plain VPS behind
-nginx/Caddy for TLS) works — point it at `npm start` and persist `DATA_DIR`.
-
-## Admin utility
-
-`scripts/admin.js` manages the live datastore:
-
-```bash
-npm run admin -- stats          # player counts, total chips mined
-npm run admin -- top 20         # leaderboard with last-seen times
-npm run admin -- find alice     # look up players by name
-npm run admin -- remove <id>    # delete a player (restart server after)
-npm run admin -- backup         # timestamped datastore backup
-```
-
-Set `DATA_DIR` to match the server when it runs somewhere custom.
+Write commands edit the file directly, so stop the server first, or restart it after.

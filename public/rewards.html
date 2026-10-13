@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Payout list — CSTR Chip Strategy</title>
+  <meta name="description" content="The public, auditable $CSTR reward list: the top linked players of each CSTR season with their wallet and weight." />
+  <meta name="theme-color" content="#0d0221" />
+  <meta name="color-scheme" content="dark" />
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="favicon-32.png" type="image/png" sizes="32x32" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="CSTR payout list" />
+  <meta property="og:description" content="Top linked players of the season and their reward weights." />
+  <meta property="og:image" content="/og.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="preload" href="fonts/press-start-2p.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="fonts/vt323.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="crt" aria-hidden="true"></div>
+  <header id="nav" class="nav">
+    <a class="logo" href="/" aria-label="CSTR home"><span class="logo-chip" aria-hidden="true"></span>CSTR</a>
+    <nav class="nav-links" aria-label="Sections">
+      <a href="/#play">Play</a>
+      <a href="/#board">Board</a>
+      <a href="/#rewards">Rewards</a>
+    </nav>
+    <div class="nav-actions"><a class="pill pill-hot" href="/#play">Play now</a></div>
+  </header>
+
+  <main>
+    <section class="hero hero-sm">
+      <div class="horizon" aria-hidden="true"><div class="grid-floor"></div></div>
+      <div class="hero-head">
+        <p class="eyebrow"><span class="dot"></span> public audit</p>
+        <h1 class="title title-sm"><span class="split" data-split>PAYOUT</span> <span class="split split-alt" data-split>LIST</span></h1>
+        <p class="lede">Who gets paid and how much. This list is generated from server-verified scores and is the same file the airdrop runs on.</p>
+      </div>
+    </section>
+
+    <section class="section section-tight">
+      <div class="audit-bar reveal">
+        <div class="seg" role="tablist" aria-label="Season">
+          <button class="pill" type="button" data-season="current" aria-pressed="true">This season</button>
+          <button class="pill" type="button" data-season="last" aria-pressed="false">Last season</button>
+        </div>
+        <div class="seg">
+          <button class="pill" type="button" data-dl="json">JSON</button>
+          <button class="pill" type="button" data-dl="csv">CSV</button>
+          <button class="pill" type="button" data-dl="snapshot">Airdrop snapshot</button>
+        </div>
+      </div>
+      <p id="audit-summary" class="muted reveal">loading…</p>
+      <div class="table-wrap card glow-border reveal">
+        <table class="audit">
+          <thead><tr><th>#</th><th>Player</th><th>Wallet</th><th class="num">Score</th><th class="num">Weight</th><th class="num">Share</th></tr></thead>
+          <tbody id="audit-body"><tr><td colspan="6" class="muted">loading…</td></tr></tbody>
+        </table>
+      </div>
+      <div class="cards cards-2 reveal-group">
+        <article class="card spot reveal">
+          <h3>Who's eligible</h3>
+          <p>You need a linked wallet (verified signature), no anti-cheat flag, and at least <b data-cfg="minScore">—</b> verified chips this season. The top <b data-cfg="top">—</b> make the list. <b>Share</b> is each wallet's cut of a pro-rata payout before any per-wallet cap.</p>
+        </article>
+        <article class="card spot reveal">
+          <h3>How it's paid</h3>
+          <p>The operator exports this list and runs the memcoinz airdrop: pro-rata by weight, or a lottery seeded with the season number. Every batch signature goes into a ledger that can't double-pay.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p class="muted small">Rewards come from $CSTR trading fees, are paid at the operator's discretion, and can change or stop. Not financial advice.</p>
+  </footer>
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script src="rewards.js"></script>
+</body>
+</html>

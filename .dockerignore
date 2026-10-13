@@ -2,3 +2,6 @@ node_modules
 data
 .git
 *.log
+rewards
+qa
+test
