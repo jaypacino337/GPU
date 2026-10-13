@@ -1,22 +1,18 @@
-/* CSTR: chip strategy. Arcade front end.
+/* CSTR: compute epochs. Arcade front end for the ORE-style board.
  *
- * Online (served by server.js): the server is the source of truth. Every
- * click / purchase is applied locally for instant feedback AND queued; batches
- * go to /api/players/:id/sync every few seconds, and the server's replayed
- * state replaces ours, with any not-yet-sent actions re-applied on top.
- *
- * Offline (static hosting, or "play offline"): same rules, saved in
- * localStorage, no leaderboard and no rewards.
+ * The server owns everything: power, deploys, settlement. This page polls
+ * /api/board (live epoch, totals, last result) every second and
+ * /api/players/:id every few seconds (power + presence heartbeat), sends
+ * deploys, and plays the reveal when an epoch it watched settles.
+ * Static hosting (no API) shows the board idle in single-page "offline" mode.
  */
 (() => {
   'use strict';
 
-  const R = window.CSTRRules;
-  const SAVE_KEY = 'cstr.save';
-  const SYNC_MS = 3000;
-  const IDLE_SYNC_MS = 15000;
+  const { SQUARES, CHIP, label } = window.CSTRRules;
+  const BOARD_MS = 1000;
+  const ME_MS = 3000;
   const LB_MS = 15000;
-  const BURST_SEC = 15;
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const store = {
@@ -26,44 +22,30 @@
   };
 
   // ------------------------------------------------------------------ state
-  let state = R.fresh();
-  let mode = 'local';            // 'online' when the API answers
-  let cfg = null;                // /api/config
+  let mode = 'local';
+  let cfg = null;
   let playerId = store.get('cstr.playerId');
-  let playerName = store.get('cstr.playerName');
-  let playerTag = null;
-  let wallet = null;
-  let flagged = false;
-  let session = null;
-  let seq = 0;
-  let queue = [];
-  let inflight = null;
-  let syncing = false;
-  let lastSyncAt = 0;
-  let season = null;             // { id, startsAt, endsAt, score }
-  let seasonDelta = 0;           // chips earned locally since the last server view
-  let serverOffset = 0;          // server clock - local clock
-  let maxCps = 20;
-  let bucket = 0;
-  let bucketAt = performance.now();
+  let me = null;               // /api/players/:id
+  let board = null;            // /api/board
+  let serverOffset = 0;
+  let selected = new Set();
+  let watching = null;         // epoch id we deployed in / saw deploys in, awaiting its reveal
+  let lastShown = null;        // last settled epoch we animated
+  let deploying = false;
   let sfxOn = store.get('cstr.sfx') !== '0';
 
-  const online = () => mode === 'online' && !!playerId && !!session;
-
   // ------------------------------------------------------------- formatting
-  const SUFFIXES = ['', 'K', 'M', 'B', 'T', 'Qa', 'Qi', 'Sx', 'Sp', 'Oc', 'No', 'Dc'];
   function fmt(n) {
-    if (!Number.isFinite(n)) return n > 0 ? '∞' : '0';
-    if (n < 1000) return String(Math.floor(n));
-    const tier = Math.floor(Math.log10(n) / 3);
-    if (tier >= SUFFIXES.length) return n.toExponential(2).replace('+', '');
-    const scaled = n / Math.pow(10, tier * 3);
-    const text = scaled.toFixed(scaled < 100 ? 1 : 0);
-    if (Number(text) >= 1000) {
-      return tier + 1 < SUFFIXES.length ? (scaled / 1000).toFixed(1) + SUFFIXES[tier + 1] : n.toExponential(2).replace('+', '');
-    }
-    return text + SUFFIXES[tier];
+    n = Number(n) || 0;
+    if (Math.abs(n) < 1000) return String(Math.floor(n));
+    const s = ['', 'K', 'M', 'B', 'T'];
+    const tier = Math.min(s.length - 1, Math.floor(Math.log10(Math.abs(n)) / 3));
+    return (n / Math.pow(10, tier * 3)).toFixed(1).replace(/\.0$/, '') + s[tier];
   }
+  const chip = (micro) => {
+    const v = (Number(micro) || 0) / CHIP;
+    return v >= 1000 ? fmt(v) : v.toLocaleString('en-US', { maximumFractionDigits: v < 1 ? 3 : 2 });
+  };
   function fmtDuration(sec) {
     sec = Math.max(0, Math.floor(sec));
     const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
@@ -72,6 +54,7 @@
     return `${m}m ${String(s).padStart(2, '0')}s`;
   }
   const escapeHtml = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  const now = () => Date.now() + serverOffset;
 
   const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
   function base58(bytes) {
@@ -86,18 +69,19 @@
   // -------------------------------------------------------------------- DOM
   const $ = (id) => document.getElementById(id);
   const el = {
-    cycles: $('cycles'), cps: $('cps'), chip: $('chip'), chipGhz: $('chip-ghz'), combo: $('combo'), fx: $('fx-layer'),
-    shop: $('shop'), ocBtn: $('overclock-btn'), ocLevel: $('oc-level'), ocCost: $('oc-cost'),
-    prestigeBtn: $('prestige-btn'), prestigeName: $('prestige-name'), prestigeInfo: $('prestige-info'),
-    statTotal: $('stat-total'), statClick: $('stat-click'), statArch: $('stat-arch'), statMult: $('stat-mult'),
-    seasonScore: $('season-score'), myRank: $('my-rank'), seasonLabel: $('season-label'), countdown: $('season-countdown'),
-    saveStatus: $('save-status'), leaderboard: $('leaderboard'), floatLayer: $('float-layer'), toast: $('toast'),
+    grid: $('grid'), overlay: $('grid-overlay'), overlayText: $('overlay-text'),
+    epochId: $('epoch-id'), timer: $('epoch-timer'), timerFill: $('timer-fill'), total: $('epoch-total'), miners: $('epoch-miners'),
+    amount: $('amount'), deployBtn: $('deploy-btn'), pickAll: $('pick-all'), pickNone: $('pick-none'), pickMax: $('pick-max'),
+    power: $('power'), powerFill: $('power-fill'), powerNote: $('power-note'), motherlode: $('motherlode'),
+    resultText: $('result-text'), result: $('result'), recent: $('recent'),
+    seasonScore: $('season-score'), myRank: $('my-rank'), statEpochs: $('stat-epochs'), statWins: $('stat-wins'),
+    seasonLabel: $('season-label'), countdown: $('season-countdown'), saveStatus: $('save-status'),
+    leaderboard: $('leaderboard'), toast: $('toast'), ticker: $('ticker'), nav: $('nav'), progress: $('progress'),
     nameModal: $('name-modal'), nameInput: $('name-input'), nameSubmit: $('name-submit'), nameSkip: $('name-skip'), nameError: $('name-error'),
     walletModal: $('wallet-modal'), walletGo: $('wallet-go'), walletUnlink: $('wallet-unlink'), walletClose: $('wallet-close'),
-    walletError: $('wallet-error'), walletCurrent: $('wallet-current'), walletCopy: $('wallet-copy'),
+    walletError: $('wallet-error'), walletCurrent: $('wallet-current'),
     walletBtn: $('wallet-btn'), linkCta: $('link-cta'), linkState: $('link-state'), sfxBtn: $('sfx-btn'),
-    tabModal: $('tab-modal'), tabResume: $('tab-resume'), nav: $('nav'), progress: $('progress'),
-    tokenStatus: $('token-status'), tokenCa: $('token-ca'), copyCa: $('copy-ca'), buyLink: $('buy-link'), ticker: $('ticker'),
+    tokenStatus: $('token-status'), tokenCa: $('token-ca'), copyCa: $('copy-ca'), buyLink: $('buy-link'),
   };
 
   // ------------------------------------------------------------------ sound
@@ -131,195 +115,242 @@
     blip(660, 0.08);
   });
 
-  // ------------------------------------------------------------------- shop
-  const shopEls = {};
-  R.BUILDINGS.forEach((b) => {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'shop-item';
-    btn.innerHTML =
-      `<span class="item-name">${b.name}</span><span class="item-count"></span>` +
-      `<span class="item-effect">+${fmt(b.cps)} chips/sec</span><span class="item-cost"></span>`;
-    btn.addEventListener('click', () => {
-      if (!act({ t: 'b', id: b.id }).ok) return;
-      btn.classList.remove('bought');
-      void btn.offsetWidth;
-      btn.classList.add('bought');
-      arp([523, 659, 784]);
-      render();
+  // ------------------------------------------------------------------- grid
+  const tiles = [];
+  for (let i = 0; i < SQUARES; i++) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'rack';
+    b.setAttribute('aria-pressed', 'false');
+    b.innerHTML = `<span class="rack-label">${label(i)}</span><span class="rack-die" aria-hidden="true"></span><span class="rack-total">0</span><span class="rack-mine"></span>`;
+    b.addEventListener('click', () => {
+      if (selected.has(i)) selected.delete(i);
+      else selected.add(i);
+      blip(selected.has(i) ? 520 : 300, 0.04);
+      renderGrid();
+      renderDeploy();
     });
-    el.shop.appendChild(btn);
-    shopEls[b.id] = { btn, cost: btn.querySelector('.item-cost'), count: btn.querySelector('.item-count') };
+    el.grid.appendChild(b);
+    tiles.push({ b, total: b.querySelector('.rack-total'), mine: b.querySelector('.rack-mine') });
+  }
+
+  function renderGrid() {
+    const totals = board ? board.totals : Array(SQUARES).fill(0);
+    const max = Math.max(1, ...totals);
+    const mine = (me && me.deployed) || [];
+    tiles.forEach((t, i) => {
+      t.total.textContent = totals[i] ? fmt(totals[i]) + ' ⚡' : '—';
+      t.mine.textContent = mine[i] ? 'you ' + fmt(mine[i]) : '';
+      t.b.style.setProperty('--heat', (totals[i] / max).toFixed(3));
+      t.b.classList.toggle('selected', selected.has(i));
+      t.b.classList.toggle('has-mine', !!mine[i]);
+      t.b.setAttribute('aria-pressed', String(selected.has(i)));
+      t.b.setAttribute('aria-label', `Rack ${label(i)}: ${totals[i] || 0} power deployed${mine[i] ? `, ${mine[i]} yours` : ''}`);
+    });
+  }
+
+  const amount = () => Math.max(1, Math.min(cfg ? cfg.rules.maxDeploy : 1000, Math.floor(Number(el.amount.value) || 0)));
+  function renderDeploy() {
+    const n = selected.size;
+    const cost = n * amount();
+    const power = me ? me.power : 0;
+    if (mode !== 'online') {
+      el.deployBtn.textContent = 'Offline';
+      el.deployBtn.disabled = true;
+    } else if (!playerId) {
+      el.deployBtn.textContent = 'Press start';
+      el.deployBtn.disabled = false;
+    } else if (!n) {
+      el.deployBtn.textContent = 'Pick racks';
+      el.deployBtn.disabled = true;
+    } else if (cost > power) {
+      el.deployBtn.textContent = `Need ${fmt(cost)} ⚡`;
+      el.deployBtn.disabled = true;
+    } else {
+      el.deployBtn.textContent = `Deploy ${fmt(cost)} ⚡ → ${n} rack${n > 1 ? 's' : ''}`;
+      el.deployBtn.disabled = deploying;
+    }
+  }
+
+  document.querySelectorAll('.step').forEach((b) =>
+    b.addEventListener('click', () => {
+      el.amount.value = String(Math.max(1, amount() + Number(b.dataset.step)));
+      renderDeploy();
+    })
+  );
+  el.amount.addEventListener('input', renderDeploy);
+  el.pickAll.addEventListener('click', () => {
+    selected = new Set(Array.from({ length: SQUARES }, (_, i) => i));
+    renderGrid();
+    renderDeploy();
+  });
+  el.pickNone.addEventListener('click', () => {
+    selected.clear();
+    renderGrid();
+    renderDeploy();
+  });
+  el.pickMax.addEventListener('click', () => {
+    if (!me || !selected.size) return showToast('Pick racks first, then Max splits your power across them.');
+    el.amount.value = String(Math.max(1, Math.min(cfg.rules.maxDeploy, Math.floor(me.power / selected.size))));
+    renderDeploy();
   });
 
-  // ---------------------------------------------------------------- actions
-  function enqueue(a) {
-    const last = queue[queue.length - 1];
-    if (a.t === 'c' && last && last.t === 'c' && last.n + a.n <= 1000) last.n += a.n;
-    else queue.push({ ...a });
-  }
-
-  /** Apply locally (instant feedback) and queue for the server when online. */
-  function act(a) {
-    const r = R.apply(state, a);
-    if (!r.ok) return r;
-    seasonDelta += r.earned;
-    if (online()) enqueue(a);
-    return r;
-  }
-
-  function refillBucket() {
-    const now = performance.now();
-    bucket = Math.min(maxCps * BURST_SEC, bucket + ((now - bucketAt) / 1000) * maxCps);
-    bucketAt = now;
-  }
-
-  let combo = 0;
-  let lastClick = 0;
-  let comboTimer = null;
-  el.chip.addEventListener('click', (ev) => {
-    let { clientX: x, clientY: y } = ev;
-    if (!x && !y) {
-      const r = el.chip.getBoundingClientRect();
-      x = r.left + r.width / 2;
-      y = r.top + r.height / 2;
-    }
-    if (online()) {
-      refillBucket();
-      if (bucket < 1) {
-        showCombo('MAX RATE', true);
-        blip(110, 0.08, 'sawtooth', 0.03);
-        return;
+  el.deployBtn.addEventListener('click', async () => {
+    if (!playerId) return el.nameModal.classList.remove('hidden');
+    if (!selected.size || !board) return;
+    deploying = true;
+    renderDeploy();
+    const squares = [...selected].sort((a, b) => a - b);
+    try {
+      const r = await api(`/api/players/${playerId}/deploy`, {
+        method: 'POST',
+        body: { epoch: board.epoch.id, squares, amount: amount(), reqId: Math.random().toString(36).slice(2) },
+      });
+      if (!r.duplicate) {
+        me.power = r.power;
+        me.deployed = r.deployed;
+        squares.forEach((q) => (board.totals[q] += amount()));
+        watching = board.epoch.id;
+        arp([392, 523, 659], 0.04);
+        if (!reduced) squares.forEach((q, k) => setTimeout(() => pulse(tiles[q].b, 'deployed'), k * 25));
+        selected.clear();
       }
-      bucket -= 1;
+      renderAll();
+    } catch (err) {
+      showToast(err.status === 409 ? 'That epoch just closed. Deploy into the new one.' : err.message);
+      blip(110, 0.12, 'sawtooth');
+      refreshMe();
+    } finally {
+      deploying = false;
+      renderDeploy();
     }
-    const { earned } = act({ t: 'c', n: 1 });
-    const now = performance.now();
-    combo = now - lastClick < 450 ? combo + 1 : 1;
-    lastClick = now;
-    if (combo >= 5) showCombo(`×${combo} COMBO`);
-    blip(330 + Math.min(combo, 30) * 18, 0.05);
-    hitFx(x, y, earned);
-    render();
   });
 
-  function showCombo(text, bad) {
-    el.combo.textContent = text;
-    el.combo.classList.toggle('throttled', !!bad);
-    el.combo.classList.add('on');
-    clearTimeout(comboTimer);
-    comboTimer = setTimeout(() => el.combo.classList.remove('on'), 700);
+  function pulse(node, cls) {
+    node.classList.remove(cls);
+    void node.offsetWidth;
+    node.classList.add(cls);
   }
 
-  let fxCount = 0;
-  function hitFx(x, y, earned) {
-    el.chip.classList.remove('hit');
-    void el.chip.offsetWidth;
-    el.chip.classList.add('hit');
-    el.cycles.classList.remove('bump');
-    void el.cycles.offsetWidth;
-    el.cycles.classList.add('bump');
-    if (fxCount > 70) return; // autoclickers: cap DOM churn
-    const f = document.createElement('span');
-    f.className = 'float-num' + (combo % 2 ? '' : ' alt');
-    f.textContent = '+' + fmt(earned);
-    f.style.left = x - 12 + Math.random() * 24 + 'px';
-    f.style.top = y - 34 + 'px';
-    el.floatLayer.appendChild(f);
-    fxCount++;
-    setTimeout(() => { f.remove(); fxCount--; }, 900);
-    if (reduced) return;
-    const ring = document.createElement('span');
-    ring.className = 'ring';
-    el.fx.appendChild(ring);
-    fxCount++;
-    setTimeout(() => { ring.remove(); fxCount--; }, 520);
-    const box = el.fx.getBoundingClientRect();
-    for (let i = 0; i < 6; i++) {
-      const p = document.createElement('span');
-      const ang = (Math.PI * 2 * i) / 6 + Math.random() * 0.6;
-      const dist = 50 + Math.random() * 60;
-      p.className = 'px';
-      p.style.left = x - box.left + 'px';
-      p.style.top = y - box.top + 'px';
-      p.style.setProperty('--dx', Math.cos(ang) * dist + 'px');
-      p.style.setProperty('--dy', Math.sin(ang) * dist + 'px');
-      p.style.setProperty('--c', i % 2 ? 'var(--color-accent)' : 'var(--color-brand)');
-      el.fx.appendChild(p);
-      fxCount++;
-      setTimeout(() => { p.remove(); fxCount--; }, 620);
-    }
+  // ------------------------------------------------------------- epoch HUD
+  function tickHud() {
+    if (!board) return;
+    const left = Math.max(0, board.epoch.endsAt - now());
+    const span = board.epoch.endsAt - board.epoch.startsAt;
+    el.epochId.textContent = '#' + board.epoch.id;
+    el.timer.textContent = left > 0 ? `${Math.floor(left / 1000)}.${Math.floor((left % 1000) / 100)}s` : 'closing';
+    el.timer.classList.toggle('hot', left < 10000);
+    el.timerFill.style.transform = `scaleX(${(left / span).toFixed(4)})`;
+    if (left === 0) refreshBoard();
+    tickSeason();
   }
 
-  el.ocBtn.addEventListener('click', () => {
-    if (!act({ t: 'o' }).ok) return;
-    arp([392, 523, 659, 1046], 0.04);
-    render();
-  });
+  function renderBoardMeta() {
+    if (!board) return;
+    const total = board.totals.reduce((a, b) => a + b, 0);
+    el.total.textContent = fmt(total) + ' ⚡';
+    el.miners.textContent = String(board.players);
+    countTo(el.motherlode, board.motherlode, (v) => chip(v) + ' CHIP');
+    el.recent.innerHTML = board.recent
+      .map((r) => `<li><a class="recent-chip${r.void ? ' void' : ''}${r.motherlode ? ' ml' : ''}" href="/rewards#e${r.epoch}" title="Epoch ${r.epoch}">${r.void ? 'VOID' : label(r.square)}</a></li>`)
+      .join('') || '<li class="muted small">no epochs settled yet</li>';
+    // Overlay while an epoch we watched waits for its drand round.
+    const pend = board.pending.find((p) => p.epoch === watching);
+    el.overlay.classList.toggle('hidden', !pend);
+    if (pend) el.overlayText.textContent = `epoch #${pend.epoch} · drand round ${pend.round}`;
+  }
 
-  el.prestigeBtn.addEventListener('click', () => {
-    const gain = R.pendingGen(state);
-    if (gain <= 0) return;
-    if (!confirm(`Tape out the next-gen chip?\n\n+${fmt(gain)} generation (+${fmt(gain * 10)}% permanent output), but chips, overclock and hardware reset.`)) return;
-    if (!act({ t: 'p' }).ok) return;
-    blip(180, 0.5, 'sawtooth', 0.04, 1400);
-    if (!reduced) {
-      document.body.classList.remove('shake');
-      void document.body.offsetWidth;
-      document.body.classList.add('shake');
+  // Reveal: sweep the racks, land on the winner, then report the result.
+  function reveal(last) {
+    if (!last || last.epoch === lastShown) return;
+    const mineEpoch = last.epoch === watching;
+    lastShown = last.epoch;
+    if (!mineEpoch) {
+      if (last.void) return;
+      flashWinner(last.square);
+      return;
     }
-    render();
-    flush();
-  });
+    watching = null;
+    if (last.void) {
+      el.resultText.textContent = `Epoch #${last.epoch} was void (${last.reason}). Your power was refunded.`;
+      return;
+    }
+    const finish = () => {
+      flashWinner(last.square);
+      refreshMe().then(() => describeResult(last));
+    };
+    if (reduced) return finish();
+    let k = 0;
+    const steps = 18 + last.square;
+    const sweep = () => {
+      tiles.forEach((t) => t.b.classList.remove('scan'));
+      tiles[k % SQUARES].b.classList.add('scan');
+      blip(220 + (k % SQUARES) * 22, 0.03, 'square', 0.02);
+      if (++k <= steps) setTimeout(sweep, 30 + k * 3);
+      else {
+        tiles.forEach((t) => t.b.classList.remove('scan'));
+        finish();
+      }
+    };
+    sweep();
+  }
+
+  function flashWinner(sq) {
+    tiles.forEach((t, i) => {
+      t.b.classList.toggle('dim', i !== sq);
+      t.b.classList.toggle('win', i === sq);
+    });
+    setTimeout(() => tiles.forEach((t) => t.b.classList.remove('dim', 'win')), 2600);
+  }
+
+  function describeResult(last) {
+    const r = me && me.lastResult;
+    if (!r || r.epoch !== last.epoch) return;
+    el.result.classList.remove('won', 'lost');
+    if (r.won) {
+      el.result.classList.add('won');
+      el.resultText.innerHTML = `Rack <b>${label(last.square)}</b> won. You got <b>+${fmt(r.power)} ⚡</b> and mined <b>+${chip(r.chips)} CHIP</b>.` +
+        (r.motherlode ? ' <span class="tag tag-pay">MOTHERLODE</span>' : '') +
+        (last.topMiner && last.topMiner === me.tag ? ' <span class="tag tag-pay">TOP MINER</span>' : '');
+      arp(r.motherlode ? [523, 659, 784, 1046, 1318, 1568, 2093] : [523, 659, 784, 1046], 0.07);
+      if (r.motherlode) showToast(`MOTHERLODE! You mined ${chip(r.chips)} CHIP this epoch.`);
+    } else {
+      el.result.classList.add('lost');
+      el.resultText.innerHTML = `Rack <b>${label(last.square)}</b> won. Your racks missed this time.`;
+      blip(160, 0.25, 'sawtooth', 0.03, -80);
+    }
+    pulse(el.result, 'pop');
+  }
 
   // ----------------------------------------------------------------- render
-  function render() {
-    el.cycles.textContent = fmt(state.cycles);
-    el.cps.textContent = fmt(R.cps(state));
-    el.chipGhz.textContent = (1 + state.clickLevel * 0.5).toFixed(1) + ' GHz';
-
-    el.ocLevel.textContent = 'Lv.' + (state.clickLevel + 1);
-    el.ocCost.textContent = fmt(R.overclockCost(state));
-    el.ocBtn.disabled = state.cycles < R.overclockCost(state) || state.clickLevel >= R.MAX_OC_LEVEL;
-
-    R.BUILDINGS.forEach((b, i) => {
-      const ui = shopEls[b.id];
-      const cost = R.buildingCost(state, b.id);
-      const n = state.buildings[b.id];
-      ui.cost.textContent = fmt(cost);
-      ui.count.textContent = n ? '×' + n : '';
-      ui.btn.disabled = state.cycles < cost;
-      ui.btn.classList.toggle('locked', i > 0 && !n && !state.buildings[R.BUILDINGS[i - 1].id] && state.totalCycles < cost);
-    });
-
-    const pending = R.pendingGen(state);
-    el.prestigeBtn.disabled = pending <= 0;
-    el.prestigeName.textContent = pending > 0 ? `Next-Gen +${fmt(pending)}` : 'Next-Gen Chip';
-    el.prestigeInfo.textContent = pending > 0 ? `reset for +${fmt(pending * 10)}% forever` : `at ${fmt((state.architectures + 1) * R.PRESTIGE_REQ)} lifetime`;
-
-    el.statTotal.textContent = fmt(state.totalCycles);
-    el.statClick.textContent = fmt(R.clickPower(state));
-    el.statArch.textContent = fmt(state.architectures);
-    const m = R.prestigeMult(state);
-    el.statMult.textContent = '×' + (m < 1000 ? m.toFixed(1) : fmt(m));
-    el.seasonScore.textContent = online() && season ? fmt(season.score + seasonDelta) : '—';
+  function renderMe() {
+    if (!me) {
+      el.power.textContent = mode === 'online' ? '—' : 'offline';
+      el.powerFill.style.transform = 'scaleX(0)';
+      return;
+    }
+    el.power.textContent = fmt(me.power) + ' ⚡';
+    const cap = cfg.rules.regenCap;
+    el.powerFill.style.transform = `scaleX(${Math.min(1, me.power / cap).toFixed(3)})`;
+    el.powerNote.textContent = me.power >= cap
+      ? `Above the ${cap} ⚡ regen cap: deploy to put it to work`
+      : `+${cfg.rules.regenPerMin} ⚡/min while you're online, up to ${cap}`;
+    el.seasonScore.textContent = chip(me.season.score) + ' CHIP';
+    el.statEpochs.textContent = fmt(me.totals.epochs);
+    el.statWins.textContent = fmt(me.totals.wins);
   }
 
-  // Idle income, wall-clock based so a throttled background tab catches up.
-  let last = performance.now();
-  setInterval(() => {
-    const now = performance.now();
-    const dt = (now - last) / 1000;
-    last = now;
-    seasonDelta += R.tick(state, dt);
-    render();
-  }, 100);
+  function renderAll() {
+    renderGrid();
+    renderDeploy();
+    renderBoardMeta();
+    renderMe();
+  }
 
   // ------------------------------------------------------------ networking
-  async function api(path, { method = 'GET', body, keepalive } = {}) {
+  async function api(path, { method = 'GET', body } = {}) {
     const res = await fetch(path, {
       method,
-      keepalive,
       headers: body ? { 'Content-Type': 'application/json' } : undefined,
       body: body ? JSON.stringify(body) : undefined,
     });
@@ -337,117 +368,55 @@
     el.saveStatus.className = 'status-line' + (kind ? ' ' + kind : '');
   }
 
-  /** Adopt the server's replayed state, then re-apply anything not yet sent. */
-  function adopt(view) {
-    state = view.state;
-    for (const a of queue) R.apply(state, a);
-    season = view.season;
-    seasonDelta = 0;
-    serverOffset = view.serverTime - Date.now();
-    playerTag = view.tag;
-    playerName = view.name;
-    wallet = view.wallet;
-    flagged = view.flagged;
-    last = performance.now();
-    renderWallet();
-    render();
-  }
-
-  async function startSession() {
-    const res = await api(`/api/players/${playerId}/session`, { method: 'POST' });
-    session = res.session;
-    seq = 0;
-    queue = [];
-    inflight = null;
-    bucket = 0;
-    bucketAt = performance.now();
-    adopt(res);
-    lastSyncAt = Date.now();
-    status('verified by server · live', 'ok');
-    if (res.offline >= 1 && res.offlineSec > 60) {
-      showToast(`Welcome back. Your rig mined ${fmt(res.offline)} chips while you were away (${fmtDuration(res.offlineSec)}).`);
-    }
-    if (res.legacyTotal > 0 && !store.get('cstr.legacySeen')) {
-      store.set('cstr.legacySeen', '1');
-      showToast(`Seasons are live and scores are now server-verified. Your legacy total of ${fmt(res.legacyTotal)} is kept as a badge.`);
-    }
-  }
-
-  async function flush(keepalive = false) {
-    if (!online() || syncing) return;
-    if (!inflight) {
-      if (!queue.length && Date.now() - lastSyncAt < IDLE_SYNC_MS) return;
-      inflight = { seq: ++seq, actions: queue.splice(0, 400) };
-    }
-    syncing = true;
+  let boardBusy = false;
+  let boardAt = 0;
+  async function refreshBoard() {
+    if (mode !== 'online' || boardBusy || Date.now() - boardAt < 400) return;
+    boardBusy = true;
+    boardAt = Date.now();
     try {
-      const res = await api(`/api/players/${playerId}/sync`, {
-        method: 'POST',
-        keepalive,
-        body: { session, seq: inflight.seq, actions: inflight.actions },
-      });
-      inflight = null;
-      lastSyncAt = Date.now();
-      adopt(res);
-      if (Date.now() - lastBoardAt > 5000) refreshLeaderboard();
-      status(flagged ? 'flagged for review · not eligible for rewards' : 'verified by server · synced ' + new Date().toLocaleTimeString(), flagged ? 'warn' : 'ok');
-    } catch (err) {
-      if (err.status === 409) {
-        session = null;
-        el.tabModal.classList.remove('hidden');
-      } else if (err.status === 404) {
-        forgetPlayer();
-      } else if (err.status === 400) {
-        inflight = null; // malformed (shouldn't happen): drop it and resync from the server's truth
-        startSession().catch(() => {});
-      } else {
-        status('connection lost · retrying', 'warn');
-      }
+      const b = await api('/api/board');
+      serverOffset = b.serverTime - Date.now();
+      const rolled = board && board.epoch.id !== b.epoch.id;
+      if (rolled && board.players > 0 && watching === null) watching = board.epoch.id; // watch any epoch with miners
+      board = b;
+      if (rolled && me) me.deployed = Array(SQUARES).fill(0);
+      renderBoardMeta();
+      renderGrid();
+      reveal(b.last);
+      status(me ? (me.flagged ? 'flagged for review · not eligible for rewards' : 'live · server-settled, drand-verified') : 'watching · press start to mine', me && me.flagged ? 'warn' : 'ok');
+    } catch {
+      status('connection lost · retrying', 'warn');
     } finally {
-      syncing = false;
+      boardBusy = false;
+    }
+  }
+
+  async function refreshMe() {
+    if (mode !== 'online' || !playerId) return;
+    try {
+      const m = await api(`/api/players/${playerId}`);
+      me = m;
+      renderMe();
+      renderGrid();
+      renderDeploy();
+      renderWallet();
+    } catch (err) {
+      if (err.status === 404) forgetPlayer();
     }
   }
 
   function forgetPlayer() {
     store.del('cstr.playerId');
     playerId = null;
-    session = null;
+    me = null;
     el.nameModal.classList.remove('hidden');
-  }
-
-  el.tabResume.addEventListener('click', async () => {
-    el.tabModal.classList.add('hidden');
-    try { await startSession(); } catch { status('connection lost · retrying', 'warn'); }
-  });
-
-  // ------------------------------------------------------------ local saves
-  function saveLocal() {
-    if (online()) return;
-    store.set(SAVE_KEY, JSON.stringify({ ...state, savedAt: Date.now() }));
-  }
-  function loadLocal() {
-    let raw = null;
-    try { raw = JSON.parse(store.get(SAVE_KEY)); } catch { raw = null; }
-    if (!raw || typeof raw !== 'object') return;
-    const s = R.fresh();
-    const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0);
-    s.cycles = num(raw.cycles);
-    s.totalCycles = Math.max(num(raw.totalCycles), s.cycles);
-    s.clickLevel = Math.min(R.MAX_OC_LEVEL, Math.floor(num(raw.clickLevel)));
-    s.architectures = Math.floor(num(raw.architectures));
-    for (const b of R.BUILDINGS) s.buildings[b.id] = Math.floor(num(raw.buildings && raw.buildings[b.id]));
-    state = s;
-    const away = Math.min(Math.max(0, (Date.now() - num(raw.savedAt)) / 1000), R.OFFLINE_CAP_SEC);
-    const earned = raw.savedAt ? R.tick(state, away) : 0;
-    if (away > 60 && earned >= 1) showToast(`Welcome back. Your rig mined ${fmt(earned)} chips while you were away (${fmtDuration(away)}).`);
   }
 
   // ------------------------------------------------------------ leaderboard
   const rows = new Map();
-  let lastBoardAt = 0;
   async function refreshLeaderboard() {
     if (mode !== 'online') return;
-    lastBoardAt = Date.now();
     let data;
     try {
       data = await api('/api/leaderboard');
@@ -456,7 +425,7 @@
     }
     if (!data.top.length) {
       rows.clear();
-      el.leaderboard.innerHTML = '<li class="lb-empty">No scores yet this season. Be the first on the board.</li>';
+      el.leaderboard.innerHTML = '<li class="lb-empty">No CHIPs mined this season yet. Deploy and be first on the board.</li>';
       el.myRank.textContent = '—';
       return;
     }
@@ -468,32 +437,26 @@
     data.top.forEach((r) => {
       seen.add(r.tag);
       let li = rows.get(r.tag);
-      const isNew = !li;
-      if (isNew) {
+      if (!li) {
         li = document.createElement('li');
         li.className = 'lb-row';
         rows.set(r.tag, li);
       }
       const prevScore = li.dataset.score;
-      li.classList.toggle('me', r.tag === playerTag);
+      li.classList.toggle('me', !!me && r.tag === me.tag);
       li.innerHTML =
         `<span class="lb-rank">${r.rank}</span>` +
         `<span class="lb-name">${escapeHtml(r.name)}</span>` +
-        `<span class="lb-meta">${r.gen ? `gen ${r.gen}` : 'gen 0'}${r.wallet ? ` · ${escapeHtml(r.wallet)}` : ' · no wallet'}` +
+        `<span class="lb-meta">${r.wins} wins${r.motherlodes ? ` · ${r.motherlodes} motherlode` : ''}${r.wallet ? ` · ${escapeHtml(r.wallet)}` : ' · no wallet'}` +
         `${r.rewarded ? ' <span class="tag tag-pay">PAID</span>' : ''}${r.flagged ? ' <span class="tag tag-flag">REVIEW</span>' : ''}</span>` +
-        `<span class="lb-score">${fmt(r.score)}</span>`;
+        `<span class="lb-score">${chip(r.score)}</span>`;
       li.dataset.score = r.score;
-      el.leaderboard.appendChild(li); // re-appending in order = reorder
-      if (!reduced && prevScore && prevScore !== String(r.score)) {
-        li.classList.remove('flash');
-        void li.offsetWidth;
-        li.classList.add('flash');
-      }
+      el.leaderboard.appendChild(li);
+      if (!reduced && prevScore && prevScore !== String(r.score)) pulse(li, 'flash');
     });
     rows.forEach((li, tag) => {
       if (!seen.has(tag)) { li.remove(); rows.delete(tag); }
     });
-    // FLIP: slide rows from their old position to the new one.
     if (!reduced) {
       rows.forEach((li, tag) => {
         const old = before.get(tag);
@@ -505,15 +468,15 @@
         if (Math.abs(dy) > 1) li.animate([{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: 600, easing: 'cubic-bezier(0.22,1,0.36,1)' });
       });
     }
-    const me = data.top.find((r) => r.tag === playerTag);
-    el.myRank.textContent = me ? '#' + me.rank : online() ? '>' + data.top.length : '—';
+    const mine = me && data.top.find((r) => r.tag === me.tag);
+    el.myRank.textContent = mine ? '#' + mine.rank : me ? '>' + data.top.length : '—';
   }
 
   async function refreshStats() {
     if (mode !== 'online') return;
     try {
       const s = await api('/api/stats');
-      const vals = { players: s.players, linked: s.linked, active: s.active, seasonChips: s.seasonChips, top: cfg.rewards.top, maxCps: cfg.maxCps };
+      const vals = { players: s.players, linked: s.linked, settled: s.settled, burned: s.burned, seasonChips: s.seasonChips / CHIP, top: cfg.rewards.top };
       el.ticker.querySelectorAll('[data-stat]').forEach((b) => {
         const v = vals[b.dataset.stat];
         if (v !== undefined) countTo(b, v);
@@ -521,51 +484,53 @@
     } catch { /* keep last */ }
   }
 
-  function countTo(node, target) {
+  function countTo(node, target, format = fmt) {
     const from = Number(node.dataset.v || 0);
     node.dataset.v = target;
-    if (reduced || from === target) { node.textContent = fmt(target); return; }
+    if (reduced || from === target) { node.textContent = format(target); return; }
     const t0 = performance.now();
     const step = (t) => {
       const k = Math.min(1, (t - t0) / 900);
-      node.textContent = fmt(from + (target - from) * (1 - Math.pow(1 - k, 3)));
+      node.textContent = format(from + (target - from) * (1 - Math.pow(1 - k, 3)));
       if (k < 1) requestAnimationFrame(step);
     };
     requestAnimationFrame(step);
   }
 
   // ---------------------------------------------------------------- season
-  function tickCountdown() {
-    if (!season) return;
-    const now = Date.now() + serverOffset;
-    if (season.id === 0) {
+  function tickSeason() {
+    const s = cfg && cfg.season;
+    if (!s) return;
+    const t = now();
+    if (s.id === 0) {
       el.seasonLabel.textContent = 'Preseason';
-      el.countdown.textContent = `season 1 starts in ${fmtDuration((season.endsAt - now) / 1000)}`;
+      el.countdown.textContent = `season 1 starts in ${fmtDuration((s.endsAt - t) / 1000)}`;
     } else {
-      el.seasonLabel.textContent = `Season ${season.id}`;
-      el.countdown.textContent = `${fmtDuration((season.endsAt - now) / 1000)} left`;
+      el.seasonLabel.textContent = `Season ${s.id}`;
+      el.countdown.textContent = `${fmtDuration((s.endsAt - t) / 1000)} left`;
     }
-    if (now >= season.endsAt && online()) flush(); // roll into the new season
+    if (t >= s.endsAt) api('/api/config').then((c) => (cfg.season = c.season)).catch(() => {});
   }
-  setInterval(tickCountdown, 1000);
 
   // ---------------------------------------------------------------- wallet
   const shortW = (w) => (w ? `${w.slice(0, 4)}…${w.slice(-4)}` : '');
   function renderWallet() {
+    const wallet = me && me.wallet;
     el.walletBtn.textContent = wallet ? shortW(wallet) : 'Link wallet';
     el.walletBtn.classList.toggle('linked', !!wallet);
     el.linkCta.textContent = wallet ? 'Wallet linked ✓' : 'Link wallet';
     el.linkState.textContent = wallet
-      ? `Paying to ${wallet}${flagged ? ' · account flagged for review, not eligible until cleared' : ''}`
-      : mode === 'online' ? 'No wallet linked. You can still play, but you won\'t be paid.' : 'Rewards need the live server.';
+      ? `Paying to ${wallet}${me.flagged ? ' · account flagged for review, not eligible until cleared' : ''}`
+      : mode === 'online' ? "No wallet linked. You can still mine, but you won't be paid." : 'Rewards need the live server.';
   }
 
   function openWallet() {
-    if (mode !== 'online') return showToast('Wallet linking needs the live game server. This copy is single-player.');
+    if (mode !== 'online') return showToast('Wallet linking needs the live game server.');
     if (!playerId) {
       el.nameModal.classList.remove('hidden');
       return showToast('Pick a handle first, then link your wallet.');
     }
+    const wallet = me && me.wallet;
     el.walletError.classList.add('hidden');
     el.walletCurrent.classList.toggle('hidden', !wallet);
     el.walletCurrent.textContent = wallet || '';
@@ -601,7 +566,7 @@
       const signed = await provider.signMessage(new TextEncoder().encode(ch.message), 'utf8');
       const sig = signed && signed.signature ? signed.signature : signed;
       await api(`/api/players/${playerId}/wallet`, { method: 'POST', body: { wallet: address, signature: base58(sig) } });
-      wallet = address;
+      if (me) me.wallet = address;
       renderWallet();
       el.walletModal.classList.add('hidden');
       arp([523, 659, 784, 1046, 1318], 0.06);
@@ -617,10 +582,10 @@
   el.walletUnlink.addEventListener('click', async () => {
     try {
       await api(`/api/players/${playerId}/wallet`, { method: 'DELETE' });
-      wallet = null;
+      if (me) me.wallet = null;
       renderWallet();
       el.walletModal.classList.add('hidden');
-      showToast('Wallet unlinked. You won\'t be paid until you link one again.');
+      showToast("Wallet unlinked. You won't be paid until you link one again.");
     } catch (err) {
       walletErr(err.message);
     }
@@ -638,13 +603,12 @@
     try {
       const data = await api('/api/players', { method: 'POST', body: { name } });
       playerId = data.id;
-      playerName = data.name;
       store.set('cstr.playerId', playerId);
-      store.set('cstr.playerName', playerName);
       store.del('cstr.skipName');
       el.nameModal.classList.add('hidden');
-      await startSession();
+      await refreshMe();
       arp([262, 330, 392, 523]);
+      showToast(`Welcome, ${data.name}. You have ${me ? me.power : 300} ⚡. Pick racks and deploy.`);
       refreshLeaderboard();
     } catch (err) {
       el.nameError.textContent = err.message || 'Server unreachable.';
@@ -658,7 +622,7 @@
   el.nameSkip.addEventListener('click', () => {
     store.set('cstr.skipName', '1');
     el.nameModal.classList.add('hidden');
-    status('offline mode · saved in this browser · not on the leaderboard');
+    renderDeploy();
   });
 
   // ------------------------------------------------------------------ toast
@@ -671,7 +635,6 @@
   }
 
   // ----------------------------------------------------------- page motion
-  // Split the hero title into letters for a staggered rise.
   document.querySelectorAll('[data-split]').forEach((node, w) => {
     const text = node.textContent;
     node.textContent = '';
@@ -683,8 +646,6 @@
       node.appendChild(s);
     });
   });
-
-  // Reveal on scroll (children of .reveal-group stagger).
   document.querySelectorAll('.reveal-group').forEach((g) => [...g.children].forEach((c, i) => c.style.setProperty('--d', i * 90 + 'ms')));
   if ('IntersectionObserver' in window) {
     const io = new IntersectionObserver((entries) => {
@@ -693,30 +654,23 @@
       });
     }, { rootMargin: '0px 0px -8% 0px' });
     document.querySelectorAll('.reveal').forEach((n) => io.observe(n));
-    // Pause the ticker when it's off-screen.
     const tio = new IntersectionObserver(([e]) => el.ticker.parentElement.classList.toggle('paused', !e.isIntersecting));
     tio.observe(el.ticker.parentElement);
   } else {
     document.querySelectorAll('.reveal').forEach((n) => n.classList.add('in'));
   }
-
-  // Seamless marquee: duplicate the ticker content once.
   [...el.ticker.children].forEach((c) => {
     const d = c.cloneNode(true);
     d.setAttribute('aria-hidden', 'true');
     el.ticker.appendChild(d);
   });
-
-  // Cursor spotlight on cards and shop rows.
   document.addEventListener('pointermove', (e) => {
-    const t = e.target.closest && e.target.closest('.spot, .shop-item');
+    const t = e.target.closest && e.target.closest('.spot, .rack');
     if (!t) return;
     const r = t.getBoundingClientRect();
     t.style.setProperty('--mx', e.clientX - r.left + 'px');
     t.style.setProperty('--my', e.clientY - r.top + 'px');
   }, { passive: true });
-
-  // Nav blur + scroll progress.
   let ticking = false;
   window.addEventListener('scroll', () => {
     if (ticking) return;
@@ -733,13 +687,11 @@
   // ------------------------------------------------------------------ config
   function applyConfig() {
     const r = cfg.rewards;
-    const vals = { top: r.top, maxCps: cfg.maxCps, minScore: fmt(r.minScore), weight: r.weight === 'sqrt' ? 'the square root' : r.weight === 'linear' ? 'all' : r.weight === 'rank' ? 'the rank' : 'none' };
+    const vals = { top: r.top, minScore: chip(r.minScore) };
     document.querySelectorAll('[data-cfg]').forEach((n) => {
       if (vals[n.dataset.cfg] !== undefined) n.textContent = vals[n.dataset.cfg];
     });
-    maxCps = cfg.maxCps;
-    season = { ...cfg.season, score: 0 };
-    serverOffset = 0;
+    el.amount.max = String(cfg.rules.maxDeploy);
     if (cfg.token.mint) {
       el.tokenStatus.textContent = 'Live. This is the only official contract address.';
       el.tokenCa.textContent = cfg.token.mint;
@@ -757,7 +709,7 @@
   // -------------------------------------------------------------------- boot
   (async () => {
     renderSfx();
-    render();
+    renderAll();
     try {
       cfg = await api('/api/config');
       if (cfg && cfg.online) mode = 'online';
@@ -767,41 +719,32 @@
 
     if (mode === 'online') {
       applyConfig();
-      tickCountdown();
-      if (playerId) {
-        try {
-          await startSession();
-        } catch (err) {
-          if (err.status === 404) forgetPlayer();
-          else status('server unreachable · retrying', 'warn');
-        }
-      } else {
-        loadLocal();
-        if (!store.get('cstr.skipName')) el.nameModal.classList.remove('hidden');
-        else status('offline mode · saved in this browser · not on the leaderboard');
+      await refreshBoard();
+      if (board && board.last) lastShown = board.last.epoch; // don't replay an old reveal on load
+      if (playerId) await refreshMe();
+      else if (!store.get('cstr.skipName')) el.nameModal.classList.remove('hidden');
+      if (me && me.deployed && me.deployed.some(Boolean)) watching = board.epoch.id;
+      if (me && me.legacyTotal > 0 && !store.get('cstr.legacySeen3')) {
+        store.set('cstr.legacySeen3', '1');
+        showToast(`CSTR is now compute epochs. Your clicker total (${fmt(me.legacyTotal)}) is kept as a legacy badge.`);
       }
+      renderAll();
       refreshLeaderboard();
       refreshStats();
+      setInterval(refreshBoard, BOARD_MS);
+      setInterval(refreshMe, ME_MS);
       setInterval(refreshLeaderboard, LB_MS);
       setInterval(refreshStats, 30000);
-      setInterval(() => {
-        if (playerId && !session && el.tabModal.classList.contains('hidden')) startSession().catch(() => {});
-        else flush();
-      }, SYNC_MS);
+      setInterval(tickHud, 100);
     } else {
-      loadLocal();
-      el.leaderboard.innerHTML = '<li class="lb-empty">Single-player build: the leaderboard and rewards need the live game server.</li>';
-      el.seasonLabel.textContent = 'Single-player';
-      el.countdown.textContent = 'offline';
-      status('single-player · saved in this browser');
+      el.leaderboard.innerHTML = '<li class="lb-empty">Offline build: the live board, leaderboard and rewards need the game server.</li>';
+      el.seasonLabel.textContent = 'Offline';
+      el.countdown.textContent = 'live board needs the server';
+      el.overlay.classList.remove('hidden');
+      el.overlayText.textContent = 'the live board needs the game server';
+      status('offline build · nothing to mine here');
     }
     renderWallet();
-    render();
-
-    setInterval(saveLocal, 5000);
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'hidden') { saveLocal(); flush(true); }
-    });
-    window.addEventListener('pagehide', () => { saveLocal(); flush(true); });
+    renderDeploy();
   })();
 })();

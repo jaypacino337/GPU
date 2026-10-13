@@ -4,14 +4,25 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { createApp } = require('../server');
+const { sha256, epochValue } = require('../lib/fairness');
+const { outcome, CHIP } = require('../public/rules.js');
 const { keypair } = require('./helpers');
 
-const T0 = Date.parse('2026-10-06T12:00:00Z');
+const T0 = Date.parse('2026-10-06T12:00:00Z'); // a minute boundary
+const EPOCH = 60000;
+
+/** Deterministic stand-in for drand (real BLS verification is tested in fairness.test.js). */
+const fakeBeacon = {
+  info: { name: 'test beacon' },
+  async get(round) {
+    return { round, signature: 'aa'.repeat(48), randomness: sha256(Buffer.from(`r${round}`)).toString('hex') };
+  },
+};
 
 async function boot(extra = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cstr-test-'));
   const clock = { t: T0 };
-  const { app, store } = createApp({ dataDir, now: () => clock.t, rewardsMinScore: 0, mint: '', ...extra });
+  const { app, store, board, tick, close: closeApp } = createApp({ dataDir, now: () => clock.t, rewardsMinScore: 0, mint: '', autoTick: false, beacon: fakeBeacon, chainLength: 50000, ...extra });
   const server = await new Promise((r) => {
     const s = app.listen(0, '127.0.0.1', () => r(s));
   });
@@ -31,22 +42,30 @@ async function boot(extra = {}) {
   };
   const close = () =>
     new Promise((r) => {
-      store.close();
+      closeApp();
       server.close(() => {
         fs.rmSync(dataDir, { recursive: true, force: true });
         r();
       });
     });
-  return { call, clock, store, close, dataDir };
+  /** Close the current epoch and settle it. */
+  const settle = async () => {
+    clock.t = (Math.floor(clock.t / EPOCH) + 1) * EPOCH + 5000;
+    await tick();
+  };
+  return { call, clock, store, board, close, dataDir, settle };
 }
 
-async function playerWithScore(h, name, clicks) {
+const epochNow = (h) => Math.floor(h.clock.t / EPOCH);
+const ALL = Array.from({ length: 25 }, (_, i) => i);
+
+/** Mine `epochs` epochs alone, covering every rack, so each one earns exactly 1 CHIP (+ any motherlode). */
+async function playerWithScore(h, name, epochs) {
   const { json: reg } = await h.call('POST', '/api/players', { name });
-  const { json: ses } = await h.call('POST', `/api/players/${reg.id}/session`);
-  // The click bucket holds 15s worth, so spread the clicks like a real player would.
-  for (let seq = 1, left = clicks; left > 0; seq++, left -= 300) {
-    h.clock.t += 15_000;
-    await h.call('POST', `/api/players/${reg.id}/sync`, { session: ses.session, seq, actions: [{ t: 'c', n: Math.min(300, left) }] });
+  for (let i = 0; i < epochs; i++) {
+    const r = await h.call('POST', `/api/players/${reg.id}/deploy`, { epoch: epochNow(h), squares: ALL, amount: 1 });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    await h.settle();
   }
   return reg;
 }
@@ -56,29 +75,47 @@ async function link(h, id, kp) {
   return h.call('POST', `/api/players/${id}/wallet`, { wallet: kp.address, signature: kp.sign(ch.message) });
 }
 
-test('register → session → sync is server-authoritative', async () => {
+test('register → deploy → settle: server-held power, verifiable result', async () => {
   const h = await boot();
   try {
     const { status, json: reg } = await h.call('POST', '/api/players', { name: 'Neo<script>' });
     assert.equal(status, 200);
     assert.equal(reg.name, 'Neoscript');
-    const { json: ses } = await h.call('POST', `/api/players/${reg.id}/session`);
-    h.clock.t += 2000;
-    const r = await h.call('POST', `/api/players/${reg.id}/sync`, {
-      session: ses.session,
-      seq: 1,
-      actions: [{ t: 'c', n: 500 }],
-    });
-    assert.equal(r.status, 200);
-    assert.equal(r.json.clicks, 40); // 2s * 20 cps
-    assert.equal(r.json.state.totalCycles, 40);
-    assert.equal(r.json.season.score, 40);
+    const me = (await h.call('GET', `/api/players/${reg.id}`)).json;
+    assert.equal(me.power, 300);
 
-    // The old "PUT my whole state" endpoint is gone.
-    const put = await h.call('PUT', `/api/players/${reg.id}`, { state: { totalCycles: 1e99 } });
-    assert.equal(put.status, 410);
-    const me = await h.call('GET', `/api/players/${reg.id}`);
-    assert.equal(me.json.state.totalCycles, 40);
+    const board = (await h.call('GET', '/api/board')).json;
+    assert.equal(board.epoch.id, epochNow(h));
+    assert.match(board.epoch.commit, /^[0-9a-f]{64}$/);
+
+    // Overspend, closed epoch, bad rack are all refused by the server.
+    assert.equal((await h.call('POST', `/api/players/${reg.id}/deploy`, { epoch: epochNow(h), squares: [0], amount: 301 })).status, 400);
+    assert.equal((await h.call('POST', `/api/players/${reg.id}/deploy`, { epoch: epochNow(h) - 1, squares: [0], amount: 1 })).status, 409);
+    assert.equal((await h.call('POST', `/api/players/${reg.id}/deploy`, { epoch: epochNow(h), squares: [99], amount: 1 })).status, 400);
+
+    const d = await h.call('POST', `/api/players/${reg.id}/deploy`, { epoch: epochNow(h), squares: [3, 4], amount: 50 });
+    assert.equal(d.status, 200);
+    assert.equal(d.json.power, 200);
+    assert.equal((await h.call('GET', '/api/board')).json.totals[3], 50);
+
+    const epoch = epochNow(h);
+    await h.settle();
+    const ep = (await h.call('GET', `/api/epochs/${epoch}`)).json;
+    assert.equal(ep.epoch, epoch);
+    assert.equal(ep.commit, board.epoch.commit);
+    assert.equal(sha256(Buffer.from(ep.seed, 'hex')).toString('hex'), ep.commit);
+    assert.equal(outcome(epochValue(epoch, ep.seed, ep.drand.randomness), 0).square, ep.square);
+
+    const after = (await h.call('GET', `/api/players/${reg.id}`)).json;
+    assert.equal(after.lastResult.epoch, epoch);
+    const won = ep.square === 3 || ep.square === 4;
+    assert.equal(after.lastResult.won, won);
+    assert.equal(after.season.score, won ? CHIP : 0);
+    assert.ok(!JSON.stringify(ep).includes(reg.id), 'secret ids never leak');
+
+    // The clicker API is gone.
+    assert.equal((await h.call('PUT', `/api/players/${reg.id}`, { state: {} })).status, 410);
+    assert.equal((await h.call('POST', `/api/players/${reg.id}/sync`, {})).status, 410);
   } finally {
     await h.close();
   }
@@ -87,8 +124,8 @@ test('register → session → sync is server-authoritative', async () => {
 test('wallet linking: valid signature links, replay/forgery/duplicates rejected', async () => {
   const h = await boot();
   try {
-    const a = await playerWithScore(h, 'alice', 100);
-    const b = await playerWithScore(h, 'bob', 100);
+    const a = await playerWithScore(h, 'alice', 1);
+    const b = await playerWithScore(h, 'bob', 1);
     const alice = keypair();
     const mallory = keypair();
 
@@ -142,9 +179,9 @@ test('rewards export: top linked players as (wallet, weight), json/csv/snapshot/
   const h = await boot();
   try {
     const kps = [keypair(), keypair(), keypair()];
-    const big = await playerWithScore(h, 'big', 1000);
-    const mid = await playerWithScore(h, 'mid', 400);
-    const unlinked = await playerWithScore(h, 'nowallet', 1200);
+    const big = await playerWithScore(h, 'big', 5);
+    const mid = await playerWithScore(h, 'mid', 2);
+    const unlinked = await playerWithScore(h, 'nowallet', 6);
     await link(h, big.id, kps[0]);
     await link(h, mid.id, kps[1]);
     assert.ok(unlinked.id);
@@ -185,6 +222,14 @@ test('rewards export: top linked players as (wallet, weight), json/csv/snapshot/
     h.clock.t += 7 * 86400_000;
     assert.equal((await h.call('GET', '/api/rewards?season=last')).json.count, 2);
     assert.equal((await h.call('GET', '/api/rewards?season=99')).status, 400);
+
+    // Motherlode pot: one hit's winners, weighted by power on the rack, linked wallets only.
+    h.board.s.hits.unshift({ epoch: 123, paid: 5 * CHIP, winners: [{ tag: big.tag, weight: 30 }, { tag: unlinked.tag, weight: 10 }, { tag: mid.tag, weight: 20 }] });
+    const ml = await h.call('GET', '/api/rewards?pot=motherlode&epoch=123');
+    assert.deepEqual(ml.json.recipients.map((x) => [x.wallet, x.weight]), [[kps[0].address, 30], [kps[1].address, 20]]);
+    assert.equal((await h.call('GET', '/api/rewards?pot=motherlode&epoch=123&format=snapshot')).json.slot, 123);
+    assert.equal((await h.call('GET', '/api/rewards?pot=motherlode&epoch=1')).status, 404);
+    assert.equal((await h.call('GET', '/api/motherlodes')).json[0].epoch, 123);
   } finally {
     await h.close();
   }
@@ -210,20 +255,29 @@ test('registration is rate limited per IP', async () => {
   }
 });
 
-test('saves persist to DATA_DIR and legacy saves migrate on boot', async () => {
+test('saves persist to DATA_DIR and clicker-era saves migrate on boot', async () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cstr-legacy-'));
   const id = 'a'.repeat(32);
   fs.writeFileSync(
     path.join(dataDir, 'players.json'),
     JSON.stringify({ [id]: { name: 'vet', state: { totalCycles: 5e12, cycles: 1, buildings: { dc: 9999 } }, createdAt: 1, updatedAt: 1 } })
   );
-  const { store } = createApp({ dataDir, now: () => T0 });
-  const p = store.get(id);
-  assert.equal(p.v, 2);
+  const opts = { dataDir, now: () => T0, autoTick: false, beacon: fakeBeacon, chainLength: 5000 };
+  const first = createApp(opts);
+  const p = first.store.get(id);
+  assert.equal(p.v, 3);
   assert.equal(p.legacyTotal, 5e12);
-  assert.equal(p.game.buildings.dc, 0);
+  assert.equal(p.power, 300);
+  const anchor = first.chain.anchor;
+  first.close();
   const onDisk = JSON.parse(fs.readFileSync(path.join(dataDir, 'players.json'), 'utf8'));
-  assert.equal(onDisk[id].v, 2);
+  assert.equal(onDisk[id].v, 3);
+  // The seed secret persists (0600), so a restart keeps the same committed chain.
+  const secretFile = path.join(dataDir, 'seed-secret.json');
+  assert.equal(fs.statSync(secretFile).mode & 0o777, 0o600);
+  const second = createApp(opts);
+  assert.equal(second.chain.anchor, anchor);
+  second.close();
   fs.rmSync(dataDir, { recursive: true, force: true });
 });
 
@@ -233,6 +287,7 @@ test('security headers + unknown API routes', async () => {
     const r = await h.call('GET', '/api/nope');
     assert.equal(r.status, 404);
     assert.match(r.headers.get('content-security-policy'), /default-src 'self'/);
+    assert.match(r.headers.get('content-security-policy'), /connect-src 'self' https:\/\/api\.drand\.sh/);
     assert.equal((await h.call('GET', '/healthz')).json.ok, true);
     assert.equal((await h.call('GET', '/api/players/zzz')).status, 404);
   } finally {

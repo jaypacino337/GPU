@@ -1,120 +1,122 @@
 # CSTR — Chip Strategy
 
-An arcade idle clicker with a **server-verified** global leaderboard. Each
-weekly season, the top players with linked wallets split $CSTR fees.
+An ORE-style mining game with a retro arcade skin. Every **60-second compute
+epoch**, players deploy free **power (⚡)** onto a 5×5 board of GPU racks. A
+**provably fair** draw picks one rack, and its miners take the round. **CHIPs**
+mined each weekly season decide who shares the **$CSTR fee pot**.
 
-- **Play:** click the chip to mine chips. Buy hardware (8 tiers, +15% price
-  each) for idle income, overclock to double each click, and tape out a
-  next-gen chip (prestige) for a permanent +10% per generation. Idle income
-  keeps accruing while you're away, up to 8h.
-- **Compete:** a weekly season score counts every chip the server verified.
-  The game itself keeps going between seasons.
-- **Earn:** link a Solana wallet with one Phantom signature. The top N linked
-  players are exported as `(wallet, weight)` for the memcoinz airdrop. See
-  [`docs/REWARDS.md`](docs/REWARDS.md).
+- Modelled on ORE (ore.supply, `regolith-labs/ore`): 25 squares, 60s rounds,
+  winner-takes-the-losers pro-rata, +1 per round split or to a "top miner",
+  and a motherlode jackpot (+0.2 per round, 1 in 500).
+- **No real-money wagering.** Power is free, regenerates while you play, and
+  can't be bought, sold or withdrawn. A real-SOL version is a separate
+  decision: [`docs/REAL-SOL-DECISION.md`](docs/REAL-SOL-DECISION.md).
 
-## Anti-cheat model
+## An epoch
 
-The browser never reports a score. It sends **inputs**, and the server replays
-them with the same rules module (`public/rules.js`) on its own clock
-(`lib/engine.js`):
+| | rule (`public/rules.js`, `lib/mining.js`) |
+|---|---|
+| Deploy | 1–1000 ⚡ per rack per call, any racks, until the epoch closes. Checked server-side against your real balance. |
+| Draw | one winning rack from the epoch's verifiable value (below) |
+| Power | losing racks' power: **10% burned**, 90% to the winning rack pro-rata. Winners also get their own deploy back. |
+| CHIP | **+1 CHIP** per epoch: 50% of epochs split it pro-rata on the winning rack, the rest send it to one **top miner** drawn by power weight |
+| Motherlode | +0.2 CHIP per epoch into a jackpot. On a hit (1/500) it goes to the winning rack pro-rata. |
+| Edge cases | nobody on the winning rack: the losing power burns and the CHIP rolls into the motherlode. No randomness within 5 min: **void, everyone refunded**. |
+| Power supply | 300 ⚡ to start; +10 ⚡/min **only while online** (presence heartbeat), until you reach 600 |
+
+## Provably fair
+
+Each epoch's seed comes from a **hash chain committed at launch**. Its commit
+is shown before the epoch opens. The seed is mixed with the **drand quicknet**
+round published *after* the epoch closes, whose BLS signature the server
+verifies. Anyone can re-check an epoch, in the browser at `/rewards#fairness` or
+with `npm run verify-epoch -- <site> <epoch>`. Details are in
+[`docs/FAIRNESS.md`](docs/FAIRNESS.md).
+
+## Abuse model
 
 | attack | what stops it |
 |---|---|
-| Edit localStorage / PUT a fake save | No such endpoint any more (`PUT` → 410). State only changes by replaying actions. |
-| Forge `"clicks: 1e9"` | Per-action max of 1000. Clicks come from a token bucket that refills at `MAX_CPS` (20) per real second and holds at most 15s worth. Excess clicks are dropped and counted. |
-| Autoclicker / bot | Clicks are capped as above. Sustained clicking at ≥85% of the cap for 15 min, or 20k dropped clicks, **flags** the account. Flagged players can still play but are left off the payout list until `npm run admin -- unflag <id>`. |
-| Fake idle time / client clock | Idle income uses the **server** time between syncs, capped at 8h offline. |
-| Buy what you can't afford | Purchases, overclock and prestige are checked against the server state. Refused actions are counted. |
-| Replay / double-submit / two tabs | One live session per player. Each batch has a sequence number, so a retried batch applies exactly once. A second tab takes over the session and the old one gets a 409. |
-| Steal someone's wallet / replay a signature | The link message carries a server-issued single-use nonce, an expiry (10 min), the player's name and tag. One wallet ↔ one player. Switching to a different wallet is allowed once per 24h, so top scores can't be rented out. |
-| Sign-up spam | Per-IP registration limit (`REG_LIMIT`/hour) on top of the general API limit. |
+| Forged balance, double spend | Power lives on the server; every deploy is checked against it. A retried deploy (same `reqId`) applies once. |
+| Late deploy / predicting the draw | Deploys into a closed epoch get a 409. The draw needs a drand round published after close, and the seed was committed in advance. |
+| Server rigging | Not possible without breaking the hash chain or drand. Stalling only voids and refunds the epoch. Verify any epoch yourself. |
+| Power farming with idle tabs | Regen only accrues while you poll (2-min grace) and stops at 600. |
+| Spam | Per-IP API and sign-up limits; 20 deploy calls per player per epoch |
+| Wallet renting / hopping | ed25519 wallet link with a single-use nonce. One wallet ↔ one player. Switching wallets is limited to once per 24h. |
+| **Sybils** (many free accounts) | **The main residual risk.** Each account gets free power. Mitigations: linear weighting (splitting gains nothing), a minimum CHIP to be paid, the per-IP sign-up limit, `--cap-bps`, manual flags (`npm run admin -- flag`), and the optional holder pot (sybils must buy $CSTR). Real-SOL deploys would close it economically; see the decision doc. |
 
-Remaining risk: **multi-accounting**. One person can run several honest-pace
-accounts, each with its own wallet. The click cap and the bot flag make that
-slow, and idle income only grows with real time, but it can't be fully stopped
-off-chain. Mitigations: a meaningful `REWARDS_MIN_SCORE`, a per-wallet
-`--cap-bps`, reviewing `admin flagged` before each payout, and the
-holders ∩ players pot, which makes every extra account also buy $CSTR.
+Older clicker saves (v1 self-reported, v2 server-verified) migrate on boot.
+Handle, tag, wallet and flags carry over; the clicker total becomes a
+display-only `legacyTotal`.
 
-Saves from before this version were self-reported. On first boot they migrate
-to v2: the run restarts under server rules and the old lifetime total is kept
-as display-only `legacyTotal`.
+## Rewards
 
-## Wallet linking
+See [`docs/REWARDS.md`](docs/REWARDS.md). Proposed $CSTR fee split via the
+shared memcoinz worker:
+- **50%** to the miners wallet (weekly, by season CHIPs)
+- **15%** to the motherlode wallet (paid on each hit)
+- **25%** to buyback + burn
+- **10%** to operations
 
-`POST /api/players/:id/wallet/challenge` returns a message. Phantom signs it
-(`signMessage`, which is free and sends no transaction). `POST
-/api/players/:id/wallet {wallet, signature}` then verifies the ed25519
-signature with `node:crypto`. A Solana address *is* the 32-byte public key;
-this is the same approach as memcoinz `seats-core.ts`. There are no private keys
-in the UI or on the server. On mobile without the extension, the button
-deep-links into Phantom's in-app browser.
+Payout lists are public at `/rewards` and export straight to
+`mc airdrop --snapshot`.
 
 ## API
 
 | | |
 |---|---|
+| `GET /api/board` | live epoch (`id`, `endsAt`, `commit`), rack totals, motherlode, last result, recent racks |
+| `GET /api/epochs?limit=` · `GET /api/epochs/:epoch` | settled epochs with seed, drand round + signature, value, winners |
+| `GET /api/motherlodes` | motherlode hits |
 | `POST /api/players {name}` | register → secret id (kept in localStorage) |
-| `POST /api/players/:id/session` | start/take over the live session, credits offline income |
-| `POST /api/players/:id/sync {session, seq, actions}` | replay a batch: `{t:'c',n}` clicks, `{t:'b',id}` buy, `{t:'o'}` overclock, `{t:'p'}` prestige |
-| `GET /api/players/:id` | your verified state |
+| `GET /api/players/:id` | your power, season, last result, deploys this epoch (also the presence heartbeat) |
+| `POST /api/players/:id/deploy {epoch, squares, amount, reqId}` | deploy power |
 | `POST /api/players/:id/wallet/challenge`, `POST`/`DELETE /api/players/:id/wallet` | wallet link |
-| `GET /api/leaderboard?season=` | top 20 (wallets truncated, `rewarded` flag) |
-| `GET /api/rewards?season=&top=&weight=&min=&format=json\|csv\|snapshot` | payout list |
-| `GET /api/seats?mint=`, `POST /api/seats/sweep` | memcoinz guest-list protocol |
-| `GET /api/config`, `GET /api/stats`, `GET /healthz` | meta |
+| `GET /api/leaderboard?season=` | top 20 by CHIPs (wallets truncated, `rewarded` flag) |
+| `GET /api/rewards?season=&top=&weight=&min=&format=json\|csv\|snapshot` | season payout list |
+| `GET /api/rewards?pot=motherlode&epoch=&format=…` | a motherlode hit's payout list |
+| `GET /api/seats?mint=`, `POST /api/seats/sweep` | memcoinz guest-list protocol (optional holder pot) |
+| `GET /api/config`, `GET /api/stats`, `GET /healthz` | meta (`config.fairness` holds the chain anchor and beacon) |
 
 ## Configuration
 
 | Variable | Default | Purpose |
 |---|---|---|
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | listen address |
-| `DATA_DIR` | `./data` | datastore (`players.json`); **mount a volume here** |
-| `CSTR_MINT` | — | token mint: shown on the site, enforced on `/api/seats` |
-| `CSTR_BUY_URL` | — | "Buy $CSTR" button target |
-| `REWARDS_TOP` | `25` | paid seats per season |
-| `REWARDS_WEIGHT` | `sqrt` | `sqrt` / `linear` / `rank` / `equal` |
-| `REWARDS_MIN_SCORE` | `1000000` | minimum season chips to be paid |
-| `SEASON_DAYS` / `SEASON_START` | `7` / `2026-10-05T00:00:00Z` | season length and start |
-| `MAX_CPS` | `20` | click rate cap |
-| `RATE_LIMIT` / `REG_LIMIT` | `300`/min / `20`/h | per-IP API / sign-up limits |
-| `MAX_PLAYERS` | `100000` | registration cap |
+| `DATA_DIR` | `./data` | `players.json`, `board.json`, `seed-secret.json`; **mount a volume** |
+| `EPOCH_SECONDS` | `60` | epoch length |
+| `CSTR_MINT` / `CSTR_BUY_URL` | — | token CA shown on the site (and enforced on `/api/seats`), buy button |
+| `REWARDS_TOP` / `REWARDS_WEIGHT` / `REWARDS_MIN_SCORE` | `25` / `linear` / `1000000` (1 CHIP) | payout list |
+| `SEASON_DAYS` / `SEASON_START` | `7` / `2026-10-05T00:00:00Z` | seasons |
+| `SEED_CHAIN_LENGTH` | `1048576` | epochs per committed chain (~2 years) |
+| `RATE_LIMIT` / `REG_LIMIT` / `MAX_PLAYERS` | `600`/min / `20`/h / `100000` | limits |
 
 ## Run
 
 ```bash
 npm install
-npm test          # signature, anti-cheat engine, rewards export, HTTP end-to-end
-npm start         # http://localhost:3000
+npm test                 # fairness (real drand BLS fixture), epoch settlement math, rewards, HTTP end-to-end
+npm start                # http://localhost:3000 (needs outbound HTTPS to api.drand.sh)
 ```
 
 ## Deploy (Railway: Docker + volume)
 
 `railway.json` builds the `Dockerfile` and health-checks `/healthz`.
+1. New service → this repo. Add a **Volume** at `/data` and set `RAILWAY_RUN_UID=0`.
+2. Allow outbound HTTPS to `api.drand.sh` (Railway allows it by default).
+3. **Keep 1 replica.** Epoch settlement and power run in-process.
+4. Back up `seed-secret.json` privately (`npm run admin -- backup` copies only
+   `players.json`). If it's lost, a new chain and anchor start on the next boot;
+   past epochs stay verifiable from their published seeds.
 
-1. Railway → New service → this repo. The config-as-code file `railway.json` is picked up automatically.
-2. Add a **Volume** mounted at `/data` (the image sets `DATA_DIR=/data`).
-3. Variables: `RAILWAY_RUN_UID=0` (Railway volumes mount as root and the image
-   runs as `node`), plus `CSTR_MINT` / `CSTR_BUY_URL` / `REWARDS_*` once the
-   token exists.
-4. Saves are written atomically (tmp + rename) about 2s after each change and
-   flushed on SIGTERM, so redeploys don't lose progress. Back up with
-   `npm run admin -- backup` (or snapshot the Railway volume).
-
-The datastore is a single JSON file held in memory. That's fine for tens of
-thousands of players on one instance. **Don't scale to more than one replica**:
-sessions and the click bucket live in that process. Past that, move `lib/store.js`
-to Supabase (jsonb + `version` column, as in memcoinz `/deploy`).
-
-A static copy still deploys to Vercel (`vercel.json`), but there it runs
-**single-player** only: no leaderboard, wallet or rewards.
+The static Vercel build (`vercel.json`) serves the pages only. The live board
+needs the Node server.
 
 ## Admin
 
 ```bash
-npm run admin -- stats | top 20 | find <name|wallet> | flagged | unflag <id> | flag <id> [why] | remove <id> | backup
-npm run export-rewards -- --url https://<domain> --season last     # → rewards/season-<n>.json for mc airdrop
+npm run admin -- stats | top 20 | find <name|wallet> | flagged | flag <id> [why] | unflag <id> | remove <id> | backup
+npm run export-rewards -- --url https://<site> --season last
+npm run export-rewards -- --url https://<site> --pot motherlode --epoch <epoch>
+npm run verify-epoch -- https://<site> <epoch>
 ```
-
-Write commands edit the file directly, so stop the server first, or restart it after.

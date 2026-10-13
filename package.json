@@ -1,18 +1,20 @@
 {
   "name": "cstr-chip-strategy",
   "version": "1.0.0",
-  "description": "CSTR — chip strategy. Microchips are the new gold: mine chips, build your rig empire, climb the leaderboard.",
+  "description": "CSTR — Chip Strategy: ORE-style compute epochs on a 5x5 board of GPU racks, provably fair (hash-chain commit + drand), season CHIPs earn $CSTR fees.",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "admin": "node scripts/admin.js",
     "test": "node --test test/*.test.js",
-    "export-rewards": "node scripts/export-rewards.js"
+    "export-rewards": "node scripts/export-rewards.js",
+    "verify-epoch": "node scripts/verify-epoch.js"
   },
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
+    "@noble/curves": "^1.9.7",
     "express": "^4.19.2"
   }
 }
